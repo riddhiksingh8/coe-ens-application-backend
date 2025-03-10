@@ -1,34 +1,37 @@
-# Use a stable Python version
-FROM python:3.10
+# Use the official Python image as the base image
+FROM python:3.13.1-slim-bookworm AS base
 
-# Set working directory
-WORKDIR /app
+# Set environment variables for Poetry installation
+ENV POETRY_VERSION=1.6.1 \
+    POETRY_HOME="/opt/poetry" \
+    POETRY_NO_INTERACTION=1 \
+    PYTHONUNBUFFERED=1
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
+# Update and install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
     build-essential \
-    python3-dev \
-    libpq-dev \
-    gcc \
-    libffi-dev
+    && rm -rf /var/lib/apt/lists/*
 
-# Upgrade pip before installing dependencies
-RUN pip install --no-cache-dir --upgrade pip setuptools wheel
+# Install Poetry
+RUN curl -sSL https://install.python-poetry.org | python3 - \
+    && ln -s $POETRY_HOME/bin/poetry /usr/local/bin/poetry
 
-# Pre-install bcrypt separately to avoid compilation errors
-RUN pip install --no-cache-dir bcrypt
+# Set the working directory
+WORKDIR /python_tutorial
 
-# Copy requirements file first to leverage caching
-COPY requirements.txt .
+# Copy pyproject.toml and poetry.lock to leverage Docker cache
+COPY pyproject.toml poetry.lock ./
 
 # Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+RUN poetry config virtualenvs.create false \
+    && poetry install --no-root --no-dev
 
-# Copy the rest of the application files
+# Copy the rest of the application code
 COPY . .
 
-# Expose the FastAPI default port
+# Expose the FastAPI port
 EXPOSE 8000
 
-# Run FastAPI with Uvicorn
+# Run the FastAPI application with Uvicorn
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
