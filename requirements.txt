@@ -1,4 +1,4 @@
-azure_storage==0.37.0
+azure-storage==0.37.0
 fastapi==0.115.11
 freezegun==1.5.1
 httpx==0.28.1
