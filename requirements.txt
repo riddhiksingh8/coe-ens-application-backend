@@ -10,4 +10,5 @@ pytest==8.3.5
 pytest_asyncio==0.25.3
 python_bcrypt==0.3.2
 SQLAlchemy==2.0.36
+pydantic[email]
 uvicorn[standard]
