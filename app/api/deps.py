@@ -22,7 +22,7 @@ async def get_session() -> AsyncGenerator[AsyncSession]:
     async with database_session.get_async_session() as session:
         yield session
 def is_tprp_route(path: str) -> bool:
-    return path.startswith("/tprp")  # Modify this based on how you match TPRP routes
+    return "tprp" in path  # Modify this based on how you match TPRP routes
 async def get_current_user(
     request: Request,  # Get the request path
     authorization: str = Security(api_key_header),
