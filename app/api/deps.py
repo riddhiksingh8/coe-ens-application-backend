@@ -57,7 +57,7 @@ async def get_current_user(
     )
     result = await session.execute(query)
     user = result.fetchone()
-
+    print("user", user)
     # If no user is found, raise an error
     if user is None:
         raise HTTPException(

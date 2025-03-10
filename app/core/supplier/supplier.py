@@ -21,8 +21,14 @@ def validate_and_update_data(data, session_id):
 
     for index, row in enumerate(data, start=1):
         # Add prefix to all keys
-        prefixed_row = {f"{prefix}{key}": str(value) for key, value in row.items()}
-        
+        prefixed_row = {
+    f"uploaded_{key}": str(value) for key, value in row.items()
+} | {
+    f"unmodified_{key}": str(value) for key, value in row.items()
+}
+        prefixed_row['unmodified_country'] = prefixed_row['unmodified_country_copy']
+        # prefixed_row.pop("uploaded_country_copy", None)
+        # prefixed_row.pop("unmodified_country_copy", None)
         # Validate required fields with prefixed keys
         missing_fields = []
         if not prefixed_row.get(f"{prefix}name"):
@@ -44,6 +50,8 @@ def validate_and_update_data(data, session_id):
         data[index - 1] = prefixed_row
 
     print("All rows are valid and updated with prefixed keys, ens_id, and session_id.")
+    print("data_validate_and_update_data", data)
+    
     return data
 
 country_cache = {}
@@ -61,9 +69,9 @@ async def process_excel_file(file_contents, session) -> Dict:
         contents = await file_contents.read()
         excel_file = io.BytesIO(contents)
         df = pd.read_excel(excel_file)
-        df = df.where(pd.notnull(df), "")      
+        df = df.where(pd.notnull(df), "")  
+        df['country_copy'] = df['country']    
         df['country'] = df['country'].apply(get_country_code_optimized)
-
 
         sheet_data = df.to_dict(orient="records")
         session_id = str(uuid.uuid4())

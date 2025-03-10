@@ -105,6 +105,17 @@ class RefreshToken(Base):
 class UploadSupplierMasterData(Base):
     __tablename__ = "upload_supplier_master_data"
     id = Column(Integer, primary_key=True, autoincrement=True)
+    unmodified_name = Column(String, nullable=True)
+    unmodified_name_international = Column(String, nullable=True)
+    unmodified_address = Column(Text, nullable=True)
+    unmodified_postcode = Column(String, nullable=True)
+    unmodified_city = Column(String, nullable=True)
+    unmodified_country = Column(String, nullable=True)
+    unmodified_phone_or_fax = Column(String, nullable=True)
+    unmodified_email_or_website = Column(String, nullable=True)
+    unmodified_national_id = Column(String, nullable=True)
+    unmodified_state = Column(String, nullable=True)
+    unmodified_address_type = Column(String, nullable=True)
     uploaded_name = Column(String, nullable=True)
     uploaded_name_international = Column(String, nullable=True)
     uploaded_address = Column(Text, nullable=True)

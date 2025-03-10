@@ -1,6 +1,7 @@
 import asyncio
 from typing import Dict
 
+import pycountry
 import requests
 from app.core.config import get_settings
 from app.core.security.jwt import create_jwt_token
@@ -15,6 +16,7 @@ from app.models import *
 from azure.storage.blob import BlobServiceClient, generate_blob_sas, BlobSasPermissions
 from datetime import datetime, timedelta
 from azure.storage.blob import generate_container_sas, ContainerSasPermissions, BlobClient
+
 def validate_and_update_data(data, session_id):
     """
     Validate the data for required fields, generate unique ens_id for each row, 
@@ -28,8 +30,14 @@ def validate_and_update_data(data, session_id):
 
     for index, row in enumerate(data, start=1):
         # Add prefix to all keys
-        prefixed_row = {f"{prefix}{key}": str(value) for key, value in row.items()}
-        
+        prefixed_row = {
+    f"uploaded_{key}": str(value) for key, value in row.items()
+} | {
+    f"unmodified_{key}": str(value) for key, value in row.items()
+}
+        prefixed_row['unmodified_country'] = prefixed_row['unmodified_country_copy']
+        # prefixed_row.pop("uploaded_country_copy", None)
+        # prefixed_row.pop("unmodified_country_copy", None)
         # Validate required fields with prefixed keys
         missing_fields = []
         if not prefixed_row.get(f"{prefix}name"):
@@ -51,14 +59,28 @@ def validate_and_update_data(data, session_id):
         data[index - 1] = prefixed_row
 
     print("All rows are valid and updated with prefixed keys, ens_id, and session_id.")
+    print("data_validate_and_update_data", data)
+    
     return data
+
+country_cache = {}
+def get_country_code_optimized(country_name):
+    if pd.isna(country_name):
+        return country_name
+    if country_name in country_cache:
+        return country_cache[country_name]
+    country = pycountry.countries.get(name=country_name)
+    country_cache[country_name] = country.alpha_2 if country else country_name  # Keep original if not found
+    return country_cache[country_name]
 
 async def process_excel_file(file_contents, session) -> Dict:
     try:
         contents = await file_contents.read()
         excel_file = io.BytesIO(contents)
         df = pd.read_excel(excel_file)
-        df = df.where(pd.notnull(df), "")
+        df = df.where(pd.notnull(df), "")  
+        df['country_copy'] = df['country']    
+        df['country'] = df['country'].apply(get_country_code_optimized)
 
         sheet_data = df.to_dict(orient="records")
         session_id = str(uuid.uuid4())
@@ -106,7 +128,7 @@ async def process_excel_file(file_contents, session) -> Dict:
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error processing the Excel file: {str(error)}"
         )
-    
+
 def trigger_supplier_validation(session_id: str, auth_token: str):
     """
     Sends a POST request to trigger supplier validation.
@@ -270,17 +292,17 @@ async def run_full_pipeline_background(session_id, session):
         print("Pipeline execution failed:", e)
 
 
-def generate_container_sas_url(storage_account_name, storage_account_key, container_name, expiry_hours):
+def generate_container_sas_url(storage_account_name, storage_account_key, container_name, expiry_weeks):
     """
     Generates a SAS URL for an Azure Storage container.
-    
+
     :param storage_account_name: Name of the Azure Storage Account
     :param storage_account_key: Storage Account Key
     :param container_name: Name of the container
-    :param expiry_hours: Validity period of the SAS token (in hours)
+    :param expiry_weeks: Validity period of the SAS token (in weeks)
     :return: Full SAS URL for the container
     """
-    expiry_time = datetime.utcnow() + timedelta(hours=expiry_hours)
+    expiry_time = datetime.utcnow() + timedelta(weeks=expiry_weeks)
     start_time = datetime.utcnow() - timedelta(minutes=5)  # Fix time skew
 
     # Generate the SAS token for the container (not a specific blob)
@@ -335,7 +357,7 @@ async def get_session_screening_status_static(
         # Example usage
         storage_account_name = get_settings().storage.storage_account_name
         storage_account_key = get_settings().storage.storage_account_key
-        session_sas = generate_container_sas_url(storage_account_name, storage_account_key, session_id, 3)
+        session_sas = generate_container_sas_url(storage_account_name, storage_account_key, session_id, 2)
         print("SAS URL:", session_sas)
         # sas_url = generate_sas_url(storage_account_name, storage_account_key, session_id)
         # print("Generated SAS URL:", sas_url)

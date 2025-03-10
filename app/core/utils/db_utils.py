@@ -234,9 +234,21 @@ async def insert_dynamic_data(
         table_class = Base.metadata.tables.get(table_name)
         if table_class is None:
             raise ValueError(f"Table '{table_name}' does not exist in the database schema.")
-        
-        
-        query = insert(table_class).values(data)
+        # Get valid column names from the table schema
+        valid_columns = set(table_class.columns.keys())
+
+        # Filter data: Keep only valid columns (ignore any extra columns)
+        cleaned_data = [
+            {key: value for key, value in row.items() if key in valid_columns}
+            for row in data
+        ]
+
+        # If no valid data remains after filtering, return an error
+        if not cleaned_data:
+            return {"status": "failure", "message": "No valid data left after filtering extra columns."}
+
+        # Insert filtered data into the table
+        query = insert(table_class).values(cleaned_data)
         print(f"query:  {query}")
         # Execute the insert query
         result = await session.execute(query)  # `result` stores the execution details
