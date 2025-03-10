@@ -1,13 +1,17 @@
-# Use the official Python image
+# Use a stable Python version
 FROM python:3.10
 
 # Set the working directory inside the container
 WORKDIR /app
 
-# Copy only the requirements file first (for caching)
+# Copy the requirements file first
 COPY requirements.txt .
 
-# Install dependencies
+# Install system dependencies (if needed)
+RUN apt-get update && apt-get install -y libpq-dev gcc
+
+# Install Python dependencies
+RUN pip install --no-cache-dir --upgrade pip
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy the rest of the application files
