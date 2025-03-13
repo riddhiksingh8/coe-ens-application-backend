@@ -1,6 +1,5 @@
 import asyncio
 from typing import Dict
-
 import pycountry
 import requests
 from app.core.config import get_settings
@@ -17,7 +16,7 @@ from azure.storage.blob import BlobServiceClient, generate_blob_sas, BlobSasPerm
 from datetime import datetime, timedelta
 from azure.storage.blob import generate_container_sas, ContainerSasPermissions, BlobClient
 
-def validate_and_update_data(data, session_id):
+def validate_and_update_data(data, user_id, session_id):
     """
     Validate the data for required fields, generate unique ens_id for each row, 
     and update each row with a session_id. Add 'upload_' prefix to every key.
@@ -54,7 +53,7 @@ def validate_and_update_data(data, session_id):
         # Generate a unique UUID for 'ens_id' and add 'session_id' to the row
         prefixed_row[f"ens_id"] = str(uuid.uuid4())
         prefixed_row[f"session_id"] = session_id
-        
+        prefixed_row[f"user_id"] = user_id
         # Update the data with the new prefixed row
         data[index - 1] = prefixed_row
 
@@ -73,19 +72,29 @@ def get_country_code_optimized(country_name):
     country_cache[country_name] = country.alpha_2 if country else country_name  # Keep original if not found
     return country_cache[country_name]
 
-async def process_excel_file(file_contents, session) -> Dict:
+async def process_excel_file(file_contents, current_user, session) -> Dict:
     try:
+        print("current_user_id", current_user)
+        validate_request = await validate_user_request(current_user, session)
+        print("validate_request:", validate_request)
+
+        if validate_request > 5:
+            raise ValueError("Maximum 5 requests can run at one time")
         contents = await file_contents.read()
         excel_file = io.BytesIO(contents)
         df = pd.read_excel(excel_file)
         df = df.where(pd.notnull(df), "")  
+        # Check if the row count exceeds 25
+        allowed_rows = 25
+        if len(df) > allowed_rows:
+            raise ValueError(f"Only {allowed_rows} rows are allowed. Please upload a valid file.")
         df['country_copy'] = df['country']    
         df['country'] = df['country'].apply(get_country_code_optimized)
 
         sheet_data = df.to_dict(orient="records")
         session_id = str(uuid.uuid4())
 
-        validate_and_update_data(sheet_data, session_id)
+        validate_and_update_data(sheet_data, current_user[1], session_id)
 
         is_inserted = await insert_dynamic_data("upload_supplier_master_data", sheet_data, session)
 

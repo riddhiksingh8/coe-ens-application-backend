@@ -19,7 +19,8 @@ router = APIRouter()
 
 @router.post("/upload-excel", response_model=ResponseMessage, status_code=status.HTTP_201_CREATED)
 async def upload_excel(file: UploadFile = File(...), session: AsyncSession = Depends(deps.get_session),
-    current_user: User = Depends(deps.get_current_user)):
+    current_user_id: User = Depends(deps.get_current_user),
+):
     try:
         # Check if a file was uploaded
         if not file:
@@ -27,8 +28,9 @@ async def upload_excel(file: UploadFile = File(...), session: AsyncSession = Dep
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="No file uploaded"
             )
+        
 
-        sheet_data = await process_excel_file(file, session)
+        sheet_data = await process_excel_file(file, current_user_id, session)
         response = ResponseMessage(
             status="success",
             data=sheet_data,  

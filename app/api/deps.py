@@ -50,39 +50,46 @@ async def get_current_user(
             detail="Table 'users_table' does not exist in the database schema."
         )
 
-    # Execute async query to fetch user with matching user_id and user_grp
-    query = select(table_class).where(
+    # Execute async query to fetch user with matching user_id and user_group
+    query = select(table_class.c.user_group, table_class.c.user_id).where(
         table_class.c.user_id == token_payload.sub,  # Match user_id
-        table_class.c.user_group == token_payload.ugr  # Match user_grp
+        table_class.c.user_group == token_payload.ugr  # Match user_group
     )
     result = await session.execute(query)
     user = result.fetchone()
-    print("user", user)
     # If no user is found, raise an error
     if user is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=api_messages.JWT_ERROR_USER_REMOVED,
         )
+    print("user", user)
+    # Extract user group (assuming it's the 3rd column in the tuple)
+    user_group = user[0]  
 
-    # Extract email (since `user` is a tuple, access it by index)
-    email = user[2]  
-
-    # If the user is the admin (admin.tprp.secure@tprp.com)
-    if email == "admin.tprp.secure@tprp.com":
-        # If trying to access any endpoint other than /tprp, deny access
-        if not is_tprp_route(path):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Admin user is restricted to TPRP endpoints only"
-            )
-
-    # 🚨 Log and restrict if a non-admin user tries to access TPRP APIs
-    if "tprp" in path and email != "admin.tprp.secure@tprp.com":
-        logger.warning(f"Unauthorized TPRP access attempt by {email} on {path}")
+    # Reject if user_group is invalid
+    allowed_groups = {"tprp_admin", "general", "super_admin"}
+    print("user_group", user_group)
+    if user_group not in allowed_groups:
+        logger.warning(f"Unauthorized access attempt with invalid user_group: {user_group}")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only admin is allowed to access TPRP APIs"
+            detail="Invalid user group"
         )
+    if user_group != "super_admin":
+        #`tprp_admin` can ONLY access `/tprp` routes
+        if user_group == "tprp_admin" and is_tprp_route(path):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Users are restricted to TPRP endpoints only"
+            )
+
+        #`general` users CANNOT access `/tprp` routes
+        if user_group == "general" and is_tprp_route(path):
+            logger.warning(f"Unauthorized TPRP access attempt by general user on {path}")
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="General users are not allowed to access TPRP APIs"
+            )
 
     return user

@@ -4,10 +4,10 @@ from sqlalchemy import and_, func, or_,  update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from app.models import Base, FinalStatus, ValidationStatus, OribisMatchStatus
+from app.models import STATUS, Base, FinalStatus, ValidationStatus, OribisMatchStatus
 from app.api import deps
 from sqlalchemy.dialects.postgresql import insert
-
+from sqlalchemy.orm import aliased
 async def get_dynamic_ens_data(
     table_name: str, 
     required_columns: list, 
@@ -422,3 +422,38 @@ async def update_supplier_master_data(session, session_id) -> Dict:
             status_code=500,
             detail=f"Unexpected error: {str(error)}"
         )
+
+async def validate_user_request(current_user, session: AsyncSession = Depends(deps.get_session)):
+    # Get the tables from metadata
+    supplier_screening_table = Base.metadata.tables.get("session_screening_status")
+    upload_supplier_data = Base.metadata.tables.get("upload_supplier_master_data")
+    user_table = Base.metadata.tables.get("users_table")
+    if supplier_screening_table is None or upload_supplier_data is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="One or more required tables do not exist in the database schema."
+        )
+
+    # Alias for readability (optional)
+    s = aliased(supplier_screening_table)
+    u = aliased(upload_supplier_data)
+    ut = aliased(user_table)
+    # Extract user group & user ID correctly
+    user_group, user_id = current_user[0], current_user[1]
+
+    # Build the async query
+    query = select(func.count()).select_from(
+        s
+        .join(u, s.c.session_id == u.c.session_id)
+        .join(ut, u.c.user_id == ut.c.user_id)  # Joining user_table
+    ).where(
+        s.c.overall_status == STATUS.IN_PROGRESS.value,
+        u.c.user_id == user_id,
+        user_table.c.user_group == user_group
+    )
+
+    result = await session.execute(query)
+    print("result.scalar()", result)
+    count = result.scalar_one_or_none()  # Returns None if no rows found
+    print("Query Result:", count)
+    return count

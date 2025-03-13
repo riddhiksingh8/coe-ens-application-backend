@@ -8,7 +8,7 @@ import io
 from app.models import *
 import pycountry
 
-def validate_and_update_data(data, session_id):
+def validate_and_update_data(data, user_id, session_id):
     """
     Validate the data for required fields, generate unique ens_id for each row, 
     and update each row with a session_id. Add 'upload_' prefix to every key.
@@ -45,7 +45,7 @@ def validate_and_update_data(data, session_id):
         # Generate a unique UUID for 'ens_id' and add 'session_id' to the row
         prefixed_row[f"ens_id"] = str(uuid.uuid4())
         prefixed_row[f"session_id"] = session_id
-        
+        prefixed_row[f"user_id"] = user_id
         # Update the data with the new prefixed row
         data[index - 1] = prefixed_row
 
@@ -64,7 +64,7 @@ def get_country_code_optimized(country_name):
     country_cache[country_name] = country.alpha_2 if country else country_name  # Keep original if not found
     return country_cache[country_name]
 
-async def process_excel_file(file_contents, session) -> Dict:
+async def process_excel_file(file_contents, current_user, session) -> Dict:
     try:
         contents = await file_contents.read()
         excel_file = io.BytesIO(contents)
@@ -76,7 +76,7 @@ async def process_excel_file(file_contents, session) -> Dict:
         sheet_data = df.to_dict(orient="records")
         session_id = str(uuid.uuid4())
 
-        validate_and_update_data(sheet_data, session_id)
+        validate_and_update_data(sheet_data, current_user[1], session_id)
 
         is_inserted = await insert_dynamic_data("upload_supplier_master_data", sheet_data, session)
 

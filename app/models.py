@@ -32,9 +32,10 @@ class OribisMatchStatus(enum.Enum):
 class TruesightStatus(enum.Enum):
     VALIDATED = "VALIDATED"
     NOT_VALIDATED = "NOT_VALIDATED"
-    NO_MATCH = "NO_MATCH"
     NOT_REQUIRED = "NOT_REQUIRED"
-    PENDING  ="PENDING"
+    PENDING = "PENDING"
+    NO_MATCH = "NO_MATCH"
+
 
 class STATUS(str, enum.Enum):  # Inherit from str to store values as text
     NOT_STARTED = "NOT_STARTED"
@@ -87,6 +88,21 @@ class UserAccount(Base):
     refresh_tokens: Mapped[list["RefreshToken"]] = relationship(back_populates="user")
 
 
+class User(Base):
+    __tablename__ = "users_table"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id= Column( String, primary_key=True)
+    email = Column(String, unique=True, nullable=False, index=True)
+    username = Column(String, unique=True, nullable=False, index=True)
+    password = Column(String, nullable=False)
+    verified = Column(Boolean, default=False, nullable=False)
+    otp = Column(String, nullable=True)
+    refresh_tokens: Mapped[list["RefreshToken"]] = relationship(back_populates="user")
+    user_group = Column(String, nullable=False)
+    def __repr__(self):
+        return f"<User(id={self.id}, user_id='{self.user_id}', email='{self.email}', username='{self.username}')>"
+
 class RefreshToken(Base):
     __tablename__ = "refresh_token"
 
@@ -96,9 +112,7 @@ class RefreshToken(Base):
     )
     used: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     exp: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    user_id: Mapped[str] = mapped_column(
-        ForeignKey("users_table.user_id", ondelete="CASCADE"),
-    )
+    user_id = Column(String, ForeignKey("users_table.user_id", ondelete="CASCADE"))  # Change to correct PK
     user: Mapped["User"] = relationship(back_populates="refresh_tokens")
     user_group: Mapped[str] = Column(String, nullable=True) 
 
@@ -164,6 +178,7 @@ class UploadSupplierMasterData(Base):
     suggested_bvd_id = Column(String, nullable=True)
     pre_existing_bvdid = Column(Boolean, default=False, nullable=False)
     process_status = Column(SQLAlchemyEnum(STATUS), nullable=False, server_default=expression.literal(STATUS.PENDING.value))
+    user_id = Column(String, ForeignKey("users_table.user_id", ondelete="CASCADE"))  # Change to correct PK
 
 class SupplierMasterData(Base):
     __tablename__ = "supplier_master_data"
@@ -231,7 +246,6 @@ class ExternalSupplierData(Base):
     pr_more_risk_score_date = Column(Date, nullable=True)
     pr_reactive_more_risk_score_date = Column(Date, nullable=True)
     payment_risk_score = Column(Numeric, nullable=True)
-    event = Column(JSONB, nullable=True)  #have to remove this
     esg_overall_rating = Column(Integer, nullable=True)
     esg_environmental_rating = Column(Integer, nullable=True)
     esg_social_rating = Column(Integer, nullable=True)
@@ -273,26 +287,15 @@ class ExternalSupplierData(Base):
     pr_more_risk_score = Column(String, nullable=True)
     pr_more_risk_score_ratio = Column(JSONB, nullable=True)
     pr_reactive_more_risk_score_ratio = Column(JSONB, nullable=True)
+    long_and_short_term_debt = Column(Numeric, nullable=True)
+    long_term_debt = Column(Numeric, nullable=True)
+    total_shareholders_equity = Column(Numeric, nullable=True)
+    default_events = Column(JSONB, nullable=True)
+    orbis_news = Column(JSONB, nullable=True)
     # Add the UniqueConstraint on the combination of ens_id and session_id
     __table_args__ = (
         UniqueConstraint('ens_id', 'session_id', name='unique_ens_session'),
     )
-
-class User(Base):
-    __tablename__ = "users_table"
-
-    id = Column(Integer, primary_key=True, index=True)
-    user_id= Column( String, primary_key=True)
-    
-    email = Column(String, unique=True, nullable=False, index=True)
-    username = Column(String, unique=True, nullable=False, index=True)
-    password = Column(String, nullable=False)
-    verified = Column(Boolean, default=False, nullable=False)
-    otp = Column(String, nullable=True)
-    refresh_tokens: Mapped[list["RefreshToken"]] = relationship(back_populates="user")
-    user_group = Column(String, nullable=False)
-    def __repr__(self):
-        return f"<User(id={self.id}, user_id='{self.user_id}', email='{self.email}', username='{self.username}')>"
 
 class KPISchemas(Base):    
     __abstract__ = True
@@ -306,43 +309,66 @@ class KPISchemas(Base):
     session_id = Column(String, nullable=False)                # Session identifier
     kpi_rating = Column(String, nullable=True) 
     kpi_definition = Column(String, nullable=True) 
-    # Ensure unique constraint for (ens_id, session_id, kpi_code)
-    __table_args__ = (
-        UniqueConstraint('ens_id', 'session_id', 'kpi_code', name='unique_ensid_session_kpicode'),
-    )
+    
 
 
 class KpiCyes(KPISchemas):
     __tablename__ = "cyes"
+    # Ensure unique constraint for (ens_id, session_id, kpi_code)
+    __table_args__ = (
+        UniqueConstraint('ens_id', 'session_id', 'kpi_code', name='unique_ensid_session_kpicyes'),
+    )
     
 
 class KpiFstb(KPISchemas):
     __tablename__ = "fstb"
+    __table_args__ = (
+        UniqueConstraint('ens_id', 'session_id', 'kpi_code', name='unique_ensid_session_kpifstb'),
+    )
     
 
 class KpiLgrk(KPISchemas):
     __tablename__ = "lgrk"
+    __table_args__ = (
+        UniqueConstraint('ens_id', 'session_id', 'kpi_code', name='unique_ensid_session_kpilgrk'),
+    )
     
 
 class KpiNews(KPISchemas):
     __tablename__ = "news"
+    __table_args__ = (
+        UniqueConstraint('ens_id', 'session_id', 'kpi_code', name='unique_ensid_session_kpinews'),
+    )
 
 
 class KpiOval(KPISchemas):
     __tablename__ = "oval"
+    __table_args__ = (
+        UniqueConstraint('ens_id', 'session_id', 'kpi_code', name='unique_ensid_session_kpioval'),
+    )
 
 class KpiOvar(KPISchemas):
     __tablename__ = "ovar"
+    __table_args__ = (
+        UniqueConstraint('ens_id', 'session_id', 'kpi_code', name='unique_ensid_session_kpiovar'),
+    )
 
 class KpiRfct(KPISchemas):
     __tablename__ = "rfct"
-    
+    __table_args__ = (
+        UniqueConstraint('ens_id', 'session_id', 'kpi_code', name='unique_ensid_session_kpirfct'),
+    )
 class KpiSape(KPISchemas):
     __tablename__ = "sape"
+    __table_args__ = (
+        UniqueConstraint('ens_id', 'session_id', 'kpi_code', name='unique_ensid_session_kpisape'),
+    )
     
 class KpiSown(KPISchemas):
     __tablename__ = "sown"
-
+    __table_args__ = (
+        UniqueConstraint('ens_id', 'session_id', 'kpi_code', name='unique_ensid_session_kpisown'),
+    )
 class EnsidScreeningStatus(Base):
     __tablename__ = "ensid_screening_status"
 
@@ -386,10 +412,10 @@ class GridManagement(Base):
     grid_bribery_fraud_corruption = Column(JSONB, nullable=True)
     grid_pep = Column(JSONB, nullable=True)
     grid_legal = Column(JSONB, nullable=True)
-
 class CompanyProfile(Base):
     __tablename__ = "company_profile"
-    id = Column(Integer, autoincrement=True)
+
+    id = Column(Integer, primary_key=True, autoincrement=True)  # Primary key added
     name = Column(String, nullable=True)  
     location = Column(String, nullable=True)
     address = Column(String, nullable=True)    
@@ -407,8 +433,11 @@ class CompanyProfile(Base):
     key_executives = Column(Text, nullable=True)    
     employee = Column(String, nullable=True)
     session_id = Column(String(50), nullable=False)
-    ens_id = Column(String(50), primary_key=True, nullable=True)
+    ens_id = Column(String(50), nullable=False)
 
+    __table_args__ = (
+        UniqueConstraint("ens_id", "session_id", name="unique_ensid_session"),
+    )
 
 
 class SentimentPlot(Base):
