@@ -1,6 +1,6 @@
 from typing import Dict
 from fastapi import Depends, logger, HTTPException, status
-from sqlalchemy import and_, func, or_,  update
+from sqlalchemy import and_, func, or_, tuple_,  update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -8,6 +8,7 @@ from app.models import STATUS, Base, FinalStatus, ValidationStatus, OribisMatchS
 from app.api import deps
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import aliased
+from datetime import datetime, timedelta
 async def get_dynamic_ens_data(
     table_name: str, 
     required_columns: list, 
@@ -442,16 +443,17 @@ async def validate_user_request(current_user, session: AsyncSession = Depends(de
     user_group, user_id = current_user[0], current_user[1]
 
     # Build the async query
-    query = select(func.count()).select_from(
-        s
-        .join(u, s.c.session_id == u.c.session_id)
-        .join(ut, u.c.user_id == ut.c.user_id)  # Joining user_table
+    one_hour_ago = datetime.utcnow() - timedelta(hours=1)
+
+    query = select(func.count(func.distinct(tuple_(s.c.session_id, s.c.overall_status, ut.c.user_group)))).select_from(
+        s.join(u, s.c.session_id == u.c.session_id).join(ut, u.c.user_id == ut.c.user_id)
     ).where(
         s.c.overall_status == STATUS.IN_PROGRESS.value,
         u.c.user_id == user_id,
-        user_table.c.user_group == user_group
+        ut.c.user_group == user_group, 
+        s.c.create_time >= one_hour_ago
     )
-
+        
     result = await session.execute(query)
     print("result.scalar()", result)
     count = result.scalar_one_or_none()  # Returns None if no rows found

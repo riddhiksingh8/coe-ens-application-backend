@@ -78,7 +78,7 @@ async def get_current_user(
         )
     if user_group != "super_admin":
         #`tprp_admin` can ONLY access `/tprp` routes
-        if user_group == "tprp_admin" and is_tprp_route(path):
+        if user_group == "tprp_admin" and not is_tprp_route(path):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Users are restricted to TPRP endpoints only"

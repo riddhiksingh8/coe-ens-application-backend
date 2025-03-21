@@ -15,8 +15,8 @@ class AccessTokenResponse(BaseResponse):
 
 
 class UserResponse(BaseResponse):
+    user_group: str
     user_id: str
-    email: EmailStr
 
 class ResponseMessage(BaseModel):
     status: str

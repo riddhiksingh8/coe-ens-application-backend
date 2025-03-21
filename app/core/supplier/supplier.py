@@ -70,6 +70,10 @@ async def process_excel_file(file_contents, current_user, session) -> Dict:
         excel_file = io.BytesIO(contents)
         df = pd.read_excel(excel_file)
         df = df.where(pd.notnull(df), "")  
+        # Check if the row count exceeds 100
+        allowed_rows = 100
+        if len(df) > allowed_rows:
+            raise ValueError(f"Only {allowed_rows} rows are allowed. Please upload a valid file.")
         df['country_copy'] = df['country']    
         df['country'] = df['country'].apply(get_country_code_optimized)
 
@@ -427,7 +431,7 @@ async def get_main_session_supplier(sess_id, page_no, rows_per_page, session) ->
         select_column = [
             "id", "name", "name_international", "address", "postcode", "city", "country",
             "phone_or_fax", "email_or_website", "national_id", "state", "ens_id",
-            "session_id", "bvd_id", "create_time", "update_time", "validation_status", "final_status"
+            "session_id", "bvd_id", "create_time", "update_time", "validation_status", "final_status", "report_generation_status"
         ]
         
         session_supplier_data = await get_dynamic_ens_data(

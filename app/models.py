@@ -198,6 +198,7 @@ class SupplierMasterData(Base):
     session_id = Column(String(50), nullable=False)
     bvd_id = Column(String(50), nullable=False)
     validation_status = Column(SQLAlchemyEnum(ValidationStatus), nullable=False,server_default=expression.literal(ValidationStatus.PENDING.value))
+    report_generation_status = Column(SQLAlchemyEnum(STATUS), nullable=False, server_default=expression.literal(STATUS.NOT_STARTED.value))
     final_status = Column(SQLAlchemyEnum(FinalStatus), nullable=False,server_default=expression.literal(FinalStatus.PENDING.value))
     # Ensure unique constraint for (ens_id, session_id)
     __table_args__ = (
@@ -292,6 +293,7 @@ class ExternalSupplierData(Base):
     total_shareholders_equity = Column(Numeric, nullable=True)
     default_events = Column(JSONB, nullable=True)
     orbis_news = Column(JSONB, nullable=True)
+    operating_revenue_usd = Column(JSONB, nullable=True)
     # Add the UniqueConstraint on the combination of ens_id and session_id
     __table_args__ = (
         UniqueConstraint('ens_id', 'session_id', name='unique_ens_session'),
@@ -447,12 +449,11 @@ class SentimentPlot(Base):
     session_id = Column(String(50), nullable=False)
     ens_id = Column(String(50), nullable=True)
     sentiment_aggregation = Column(JSONB)
-
 class NewsMaster(Base):
     __tablename__ = "news_master"
 
-    id = Column(Integer, autoincrement=True)
-    link = Column(Text, primary_key=True)
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    link = Column(Text)
     name = Column(String, nullable=False)
     title = Column(Text)
     category = Column(Text)
@@ -462,3 +463,6 @@ class NewsMaster(Base):
     content_filtered = Column(Boolean)
     country = Column(Text)
     
+    __table_args__ = (
+        UniqueConstraint("name", "link", "news_date", name="unique_name_link_date"),
+    )
