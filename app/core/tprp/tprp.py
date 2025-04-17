@@ -267,7 +267,7 @@ async def run_full_pipeline_background(session_id, session):
 
                 retry_count += 1
                 print(f"Retrying... Attempt {retry_count}/{max_retries}")
-                await asyncio.sleep(120)  # Wait for 2 minutes before retrying
+                await asyncio.sleep(30)  # Wait for 30 sec before retrying
 
             except Exception as e:
                 print("Error polling session status:", e)

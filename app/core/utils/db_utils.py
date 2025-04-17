@@ -4,7 +4,7 @@ from sqlalchemy import and_, func, or_, tuple_,  update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from app.models import STATUS, Base, FinalStatus, ValidationStatus, OribisMatchStatus
+from app.models import STATUS, Base, FinalStatus, FinalValidatedStatus, OribisMatchStatus
 from app.api import deps
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import aliased
@@ -37,7 +37,7 @@ async def get_dynamic_ens_data(
             query = query.where(table_class.c.ens_id == str(ens_id)).distinct()
         if session_id:
             query = query.where(table_class.c.session_id == str(session_id))
-        query = query.order_by(table_class.c.update_time.desc())
+        query = query.order_by(table_class.c.update_time.desc(), table_class.c.id.desc())
         # Execute query to check if session_id or ens_id exists
         exists_query = select(func.count()).select_from(table_class)
 
@@ -57,14 +57,22 @@ async def get_dynamic_ens_data(
 
         # Apply validation status filter
         if extra_filters:
-            validation_status = extra_filters.get("validation_status", "").strip().lower()
-            if validation_status:
-                if validation_status == 'pending':
-                    query = query.where(table_class.c.validation_status == ValidationStatus.PENDING)
-                elif validation_status == 'nomatch':
-                    query = query.where(table_class.c.validation_status == ValidationStatus.NOT_VALIDATED)
-                elif validation_status == 'match':
-                    query = query.where(table_class.c.validation_status == ValidationStatus.VALIDATED)
+            final_validation_status = extra_filters.get("final_validation_status", "").strip().lower()
+            if final_validation_status:
+                if final_validation_status == 'review':
+                    query = query.where(table_class.c.final_validation_status == FinalValidatedStatus.REVIEW)
+                elif final_validation_status == 'auto_reject':
+                    query = query.where(table_class.c.final_validation_status == FinalValidatedStatus.AUTO_REJECT)
+                elif final_validation_status == 'auto_accept':
+                    query = query.where(table_class.c.final_validation_status == FinalValidatedStatus.AUTO_ACCEPT)
+                                
+            # add additional filter[optional] where screening_ana_status != 'NOT_STARTED'
+            screening_analysis_status = extra_filters.get("screening_analysis_status", "").strip().lower()
+            if screening_analysis_status:
+                if screening_analysis_status == 'active':
+                    query = query.where(table_class.c.screening_analysis_status != STATUS.NOT_STARTED)
+                elif screening_analysis_status == 'not_started':
+                    query = query.where(table_class.c.screening_analysis_status == STATUS.NOT_STARTED)
 
             # Validate pagination inputs
             offset = extra_filters.get("offset", 0)
@@ -92,6 +100,7 @@ async def get_dynamic_ens_data(
             # Apply offset and limit
             query = query.offset(offset).limit(limit)
 
+        print("_______query____", query , "\n offset", offset, "\n limit", limit )
         # Execute query
         result = await session.execute(query)
         columns = result.keys()
@@ -100,6 +109,7 @@ async def get_dynamic_ens_data(
         formatted_res = [dict(zip(columns, row)) for row in rows]
         total_count = len(formatted_res) if not total_count else total_count
 
+        print("formatted_res______", formatted_res)
         return formatted_res, total_count
 
     except HTTPException as http_err:
@@ -357,8 +367,7 @@ async def update_supplier_master_data(session, session_id) -> Dict:
         query = select(*columns_to_select).where(
             and_(
                 or_(
-                    upload_supplier_master_table.c.final_status == FinalStatus.ACCEPTED,
-                    upload_supplier_master_table.c.orbis_matched_status == OribisMatchStatus.MATCH
+                    upload_supplier_master_table.c.final_status == FinalStatus.ACCEPTED
                 ),
                 upload_supplier_master_table.c.session_id == session_id,
                 upload_supplier_master_table.c.bvd_id.isnot(None)  # Ensure bvd_id is not NULL

@@ -23,6 +23,9 @@ class FinalValidatedStatus(enum.Enum):
     NOT_REQUIRED = "NOT_REQUIRED"
     PENDING  ="PENDING"
     FAILED = "FAILED"
+    AUTO_REJECT = "AUTO_REJECT"
+    AUTO_ACCEPT = "AUTO_ACCEPT"
+    REVIEW = "REVIEW"
 
 class OribisMatchStatus(enum.Enum):
     MATCH = "MATCH"
@@ -44,6 +47,11 @@ class STATUS(str, enum.Enum):  # Inherit from str to store values as text
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"
     PENDING = "PENDING"
+
+class DUPINSESSION(str, enum.Enum):
+    RETAIN = "RETAIN"
+    REMOVE = "REMOVE"
+    UNIQUE = "UNIQUE"
 
 class Base(DeclarativeBase):
     create_time: Mapped[datetime] = mapped_column(
@@ -179,6 +187,9 @@ class UploadSupplierMasterData(Base):
     pre_existing_bvdid = Column(Boolean, default=False, nullable=False)
     process_status = Column(SQLAlchemyEnum(STATUS), nullable=False, server_default=expression.literal(STATUS.PENDING.value))
     user_id = Column(String, ForeignKey("users_table.user_id", ondelete="CASCADE"))  # Change to correct PK
+    uploaded_external_vendor_id = Column(String, nullable=True)
+    duplicate_in_session = Column(SQLAlchemyEnum(DUPINSESSION), nullable=False, server_default=expression.literal(DUPINSESSION.UNIQUE.value))
+
 
 class SupplierMasterData(Base):
     __tablename__ = "supplier_master_data"
@@ -462,7 +473,21 @@ class NewsMaster(Base):
     sentiment = Column(String)
     content_filtered = Column(Boolean)
     country = Column(Text)
-    
+    start_date = Column (Date)
+    end_date = Column(Date)
     __table_args__ = (
         UniqueConstraint("name", "link", "news_date", name="unique_name_link_date"),
+    )
+
+class Summary(Base):
+    __tablename__ = "summary"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    session_id = Column(String(50), nullable=False)
+    ens_id = Column(String(50), nullable=True)
+    area = Column(String(50), nullable=False) 
+    summary = Column(Text)
+
+    __table_args__ = (
+        UniqueConstraint("ens_id", "session_id", "area", name="unique_ens_session_summary"),
     )

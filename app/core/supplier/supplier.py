@@ -124,14 +124,14 @@ async def process_excel_file(file_contents, current_user, session) -> Dict:
             detail=f"Error processing the Excel file: {str(error)}"
         )
 
-async def get_session_supplier(sess_id, page_no, rows_per_page, validation_filter, session) -> Dict:
+async def get_session_supplier(sess_id, page_no, rows_per_page, final_validation_status, session) -> Dict:
     try:
         if not sess_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Session ID is required.")
 
-        offset = page_no * rows_per_page if page_no else 0
+        offset = (page_no-1) * rows_per_page if page_no else 0
         limit = rows_per_page if rows_per_page else 10000
-        extra_filters = {"offset": offset, "limit": limit, "validation_status": validation_filter}
+        extra_filters = {"offset": offset, "limit": limit, "final_validation_status": final_validation_status}
 
         select_column = ["id", "uploaded_name", "uploaded_name_international", "uploaded_address", "uploaded_postcode", 
                          "uploaded_city", "uploaded_country", "uploaded_phone_or_fax", "uploaded_email_or_website", 
@@ -139,7 +139,7 @@ async def get_session_supplier(sess_id, page_no, rows_per_page, validation_filte
                          "bvd_id", "validation_status", "suggested_name", "suggested_name_international", 
                          "suggested_address", "suggested_postcode", "suggested_city", "suggested_country", 
                          "suggested_phone_or_fax", "suggested_email_or_website", "suggested_national_id", 
-                         "suggested_state", "suggested_address_type", "orbis_matched_status"]
+                         "suggested_state", "suggested_address_type", "orbis_matched_status", "final_status", "final_validation_status", "matched_percentage", "duplicate_in_session"]
 
         session_supplier_data = await get_dynamic_ens_data(
             table_name="upload_supplier_master_data", 
@@ -201,11 +201,20 @@ async def update_suggestions_bulk(payload, session) -> Dict:
         accept_match_query = (
             update(table_class)
             .where(table_class.c.session_id == payload.session_id)
-            .where(table_class.c.orbis_matched_status == OribisMatchStatus.MATCH)
+            .where(table_class.c.final_validation_status == FinalValidatedStatus.AUTO_ACCEPT)
             .values(final_status=FinalStatus.ACCEPTED)
         )
         accepted_rows = await session.execute(accept_match_query)
         print("Accepted Rows with MATCH status:", accepted_rows.rowcount)
+
+        reject_match_query = (
+            update(table_class)
+            .where(table_class.c.session_id == payload.session_id)
+            .where(table_class.c.final_validation_status == FinalValidatedStatus.AUTO_REJECT)
+            .values(final_status=FinalStatus.REJECTED)
+        )
+        rejected_rows = await session.execute(reject_match_query)
+        print("Accepted Rows with MATCH status:", rejected_rows.rowcount)
 
         # Step 2: Reject all others unless explicitly accepted in the payload
         final_response = (
@@ -217,7 +226,7 @@ async def update_suggestions_bulk(payload, session) -> Dict:
         reject_or_accept_others_query = (
             update(table_class)
             .where(table_class.c.session_id == payload.session_id)
-            .where(table_class.c.orbis_matched_status != OribisMatchStatus.MATCH)
+            .where(table_class.c.final_validation_status == FinalValidatedStatus.REVIEW) 
             .values(
                 name=table_class.c.suggested_name,
                 name_international=table_class.c.suggested_name_international,
@@ -237,23 +246,17 @@ async def update_suggestions_bulk(payload, session) -> Dict:
         result = await session.execute(reject_or_accept_others_query)
         print("Updated Rows (Non-MATCH statuses):", result.rowcount)
 
-        # Check if any rows were updated
-        if accepted_rows.rowcount == 0 and result.rowcount == 0:
-            raise HTTPException(
-                status_code=404, 
-                detail=f"No records found for session_id: {payload.session_id}"
-            )
 
-        # Commit the transaction
-        await session.commit()
-
-        # Step 3: Call update_supplier_master_data to process changes
-        response_supplier_master_data = await update_supplier_master_data(session, payload.session_id)
+        if (accepted_rows.rowcount + result.rowcount):
+            # Step 3: Call update_supplier_master_data to process changes
+            response_supplier_master_data = await update_supplier_master_data(session, payload.session_id)
         
         return {
             "status": "success",
-            "message": f"Updated {accepted_rows.rowcount + result.rowcount} rows successfully.",
-            "details": response_supplier_master_data
+            "message": f"Updated {accepted_rows.rowcount + rejected_rows.rowcount + result.rowcount} rows successfully.",
+            "accepted_count": accepted_rows.rowcount,
+            "rejected_count": rejected_rows.rowcount,
+            "review_count": result.rowcount
         }
 
     except HTTPException as http_err:
@@ -319,16 +322,25 @@ async def update_suggestions_single(payload, session_id, session: AsyncSession) 
         accept_match_query = (
             update(table_class)
             .where(table_class.c.session_id == session_id)
-            .where(table_class.c.orbis_matched_status == OribisMatchStatus.MATCH)
+            .where(table_class.c.final_validation_status == FinalValidatedStatus.AUTO_ACCEPT)
             .values(final_status=FinalStatus.ACCEPTED)
         )
         accepted_rows = await session.execute(accept_match_query)
         print("Accepted Rows with MATCH status:", accepted_rows.rowcount)
+
+        reject_match_query = (
+            update(table_class)
+            .where(table_class.c.session_id == session_id)
+            .where(table_class.c.final_validation_status == FinalValidatedStatus.AUTO_REJECT)
+            .values(final_status=FinalStatus.REJECTED)
+        )
+        rejected_rows = await session.execute(reject_match_query)
+        print("Accepted Rows with MATCH status:", rejected_rows.rowcount)
         # Step 3: Fetch accepted ens_ids from DB
         accepted_rows_query = (
             select(table_class.c.ens_id)
             .where(table_class.c.session_id == session_id)
-            .where(table_class.c.orbis_matched_status == OribisMatchStatus.MATCH)
+            .where(table_class.c.final_validation_status == FinalValidatedStatus.AUTO_ACCEPT)
         )
         result_rows_query = await session.execute(accepted_rows_query)
         ac_ens_ids = result_rows_query.fetchall()
@@ -355,7 +367,7 @@ async def update_suggestions_single(payload, session_id, session: AsyncSession) 
             accept_query = (
                 update(table_class)
                 .where(table_class.c.ens_id.in_(accepted_ensid))
-                .where(table_class.c.orbis_matched_status != OribisMatchStatus.MATCH)
+                .where(table_class.c.final_validation_status == FinalValidatedStatus.REVIEW)
                 .values(
                     name=table_class.c.suggested_name,
                     name_international=table_class.c.suggested_name_international,
@@ -397,8 +409,9 @@ async def update_suggestions_single(payload, session_id, session: AsyncSession) 
         print("Final Rejected ens_ids:", reject_ensid)
 
         # Step 9: Update supplier master data
-        response_supplier_master_data = await update_supplier_master_data(session, session_id)
-        print("Response from update_supplier_master_data:", response_supplier_master_data)
+        if len(list(accepted_ensid)):
+            response_supplier_master_data = await update_supplier_master_data(session, session_id)
+            print("Response from update_supplier_master_data:", response_supplier_master_data)
 
         # Return the response
         return {
@@ -423,7 +436,7 @@ async def get_main_session_supplier(sess_id, page_no, rows_per_page, session) ->
         print("sess_id", sess_id)
 
         # Calculate offset and limit based on page_no and rows_per_page
-        offset = page_no * rows_per_page if page_no else 0
+        offset = (page_no-1) * rows_per_page if page_no else 0
         limit = rows_per_page if rows_per_page else 10000
         print("offset", offset, "limit", limit)
         extra_filters = {"offset": offset, "limit": limit}
@@ -471,13 +484,13 @@ async def get_main_session_supplier(sess_id, page_no, rows_per_page, session) ->
             detail=f"An unexpected error occurred: {str(error)}"
         )
     
-async def get_session_screening_status(page_no: int, rows_per_page: int, session) -> Dict:
+async def get_session_screening_status(page_no: int, rows_per_page: int, screening_analysis_status, session) -> Dict:
     try:
         # Calculate offset and limit based on page_no and rows_per_page
-        offset = page_no * rows_per_page if page_no else 0
+        offset = (page_no-1) * rows_per_page if page_no else 0
         limit = rows_per_page if rows_per_page else 10000
         print("offset", offset, "limit", limit)
-        extra_filters = {"offset": offset, "limit": limit}
+        extra_filters = {"offset": offset, "limit": limit, "screening_analysis_status": screening_analysis_status}
 
         select_column = [
             "id", "session_id", "overall_status", "list_upload_status", 
@@ -532,7 +545,7 @@ async def get_nomatch_count(sess_id, session) -> Dict:
 
         not_validated_query = select(func.count()).select_from(table_class).where(
             table_class.c.session_id == sess_id,
-            table_class.c.orbis_matched_status == OribisMatchStatus.NO_MATCH
+            table_class.c.final_validation_status == FinalValidatedStatus.REVIEW
         )
         not_validated_result = await session.execute(not_validated_query)
         not_validated_count = not_validated_result.scalar()

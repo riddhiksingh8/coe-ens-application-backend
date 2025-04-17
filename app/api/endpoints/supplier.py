@@ -1,4 +1,4 @@
-from typing import List, Literal
+from typing import List, Literal, Optional
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.schemas.requests import BulkPayload, SinglePayloadItem
@@ -51,9 +51,9 @@ async def upload_excel(file: UploadFile = File(...), session: AsyncSession = Dep
 @router.get("/get-supplier-data", response_model=ResponseMessage, status_code=status.HTTP_200_OK)
 async def get_supplier_data(
     session_id: str, 
-    page_no: int = Query(0, ge=0),       
+    page_no: int = Query(1, ge=1),       
     rows_per_page: int = Query(10, le=1000), 
-    validation_filter: Literal["", "match", "nomatch", "pending"] = "",
+    final_validation_status: Literal["", "review", "auto_reject", "auto_accept"] = "",
     session: AsyncSession = Depends(deps.get_session),
     current_user: User = Depends(deps.get_current_user)
 ):
@@ -66,7 +66,7 @@ async def get_supplier_data(
             )
 
         # Fetch data from DB
-        sheet_data = await get_session_supplier(session_id, page_no, rows_per_page, validation_filter, session)
+        sheet_data = await get_session_supplier(session_id, page_no, rows_per_page, final_validation_status, session)
 
         return ResponseMessage(
             status="success",
@@ -171,7 +171,7 @@ async def accept_suggestions_single(
 @router.get("/get-main-supplier-data", response_model=ResponseMessage)
 async def get_main_supplier_data(
     session_id: str, 
-    page_no: int = Query(0, ge=0),       
+    page_no: int = Query(1, ge=1),       
     rows_per_page: int = Query(10, le=1000), 
     session: AsyncSession = Depends(deps.get_session),
     current_user: User = Depends(deps.get_current_user)
@@ -206,14 +206,15 @@ async def get_main_supplier_data(
 
 @router.get("/get-session-screening-status", response_model=ResponseMessage)
 async def get_session_screening_status_data(
-    page_no: int = Query(0, ge=0),       
+    page_no: int = Query(1, ge=1),       
     rows_per_page: int = Query(10, le=1000), 
+    screening_analysis_status: Optional[Literal["", "active", "not_started"]] = "",
     session: AsyncSession = Depends(deps.get_session),
     current_user: User = Depends(deps.get_current_user)
 ):
     try:
         # Fetch screening status data
-        sheet_data = await get_session_screening_status(page_no, rows_per_page, session)
+        sheet_data = await get_session_screening_status(page_no, rows_per_page, screening_analysis_status, session)
 
         # Ensure the data exists
         if not sheet_data["data"]:
