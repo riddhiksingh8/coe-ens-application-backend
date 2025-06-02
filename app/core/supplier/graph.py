@@ -540,7 +540,7 @@ async def compile_company_financials(ens_id: str, session):
 
 
             if any(x in metric_name for x in ['ratio', 'roce', 'roe', 'margin']):
-                return f"{float(entry["value"]):.2f}%"
+                return f"{float(entry['value']):.2f}%"
 
             value_usd = float(value) * 1000
             abs_value = abs(value_usd)
