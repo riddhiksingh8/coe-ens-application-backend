@@ -1,7 +1,7 @@
 from fastapi import APIRouter
 
 from app.api import api_messages
-from app.api.endpoints import auth, users, supplier, report, tprp
+from app.api.endpoints import auth, users, supplier, report, tprp, streaming, graph
 
 auth_router = APIRouter()
 auth_router.include_router(auth.router, prefix="/auth", tags=["auth"])
@@ -35,3 +35,6 @@ api_router.include_router(users.router, prefix="/users", tags=["users"])
 api_router.include_router(supplier.router, prefix="/supplier", tags=["supplier"])
 api_router.include_router(report.router, prefix="/report", tags=["Report"])
 api_router.include_router(tprp.router, prefix="/tprp", tags=["TPRP"])
+api_router.include_router(streaming.router, prefix="/streaming", tags=["streaming"])
+
+api_router.include_router(graph.router, prefix="/graph", tags=["graph"])

@@ -21,6 +21,7 @@ from app.core.security.password import (
 from app.models import Base, RefreshToken, User
 from app.schemas.requests import RefreshTokenRequest, UserCreateRequest
 from app.schemas.responses import AccessTokenResponse, UserResponse
+from app.schemas.logger import logger
 
 router = APIRouter()
 
@@ -82,10 +83,10 @@ async def login_access_token(
     existing_user = result.fetchone()  # Use fetchone() instead of first()
 
     if existing_user:
-        print("result:", dict(existing_user._mapping))  # Convert existing_user to dictionary and print
+        logger.debug(f"result: {dict(existing_user._mapping)}")  # Convert existing_user to dictionary and print
         existing_user = dict(existing_user._mapping)
     else:
-        print("result: None")  # Handle no records found
+        logger.warning("existing_user result: None")  # Handle no records found
         existing_user = None
     
     if existing_user is None:
@@ -104,7 +105,7 @@ async def login_access_token(
         )
 
     jwt_token = create_jwt_token(user_id=existing_user['user_id'], user_group=existing_user['user_group'])
-    print("existing_user['user_id']", existing_user['user_id'])
+    logger.debug(f"existing_user['user_id'] {existing_user['user_id']}")
     refresh_token_table = Base.metadata.tables.get("refresh_token")
     if refresh_token_table is None:
         raise ValueError("Table 'users_table' does not exist in the database schema.")
@@ -239,7 +240,7 @@ async def register_new_user(
     new_user: UserCreateRequest,
     session: AsyncSession = Depends(deps.get_session),
 ):
-    print(f"Registering new user: {new_user.email}")
+    logger.info(f"Registering new user: {new_user.email}")
     table_class = Base.metadata.tables.get("users_table")
     if table_class is None:
         raise ValueError("Table 'users_table' does not exist in the database schema.")

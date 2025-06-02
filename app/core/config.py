@@ -16,10 +16,11 @@
 
 from functools import lru_cache
 from pathlib import Path
-
+from typing import Optional
 from pydantic import AnyHttpUrl, AnyUrl, BaseModel, SecretStr, computed_field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.engine.url import URL
+
 
 PROJECT_DIR = Path(__file__).parent.parent.parent
 
@@ -56,12 +57,23 @@ class Urls(BaseModel):
     news_backend: str
     news_scraper: str
 
+class GraphDb(BaseModel):
+    uri: str
+    user: str
+    password: str
+
+class AllowedRows(BaseModel):
+    general : int
+    tprp : int
 
 class Settings(BaseSettings):
     security: Security
     storage: Storage
     database: Database
     urls: Urls
+    graphdb: GraphDb
+    allowedrows: AllowedRows
+
 
     @computed_field  # type: ignore[prop-decorator]
     @property

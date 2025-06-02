@@ -9,11 +9,7 @@ from app.api import api_messages
 from app.core import database_session
 from app.core.security.jwt import verify_jwt_token
 from app.models import User, Base
-import logging
-
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+from app.schemas.logger import logger
 
 # Accept Bearer Token directly in headers
 api_key_header = APIKeyHeader(name="Authorization", auto_error=False)
@@ -41,7 +37,7 @@ async def get_current_user(
 
     # Verify the JWT token
     token_payload = verify_jwt_token(token)
-    print("token_payload", token_payload)
+    logger.debug(f"token_payload, {token_payload}")
 
     table_class = Base.metadata.tables.get("users_table")
     if table_class is None:
@@ -63,15 +59,15 @@ async def get_current_user(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=api_messages.JWT_ERROR_USER_REMOVED,
         )
-    print("user", user)
+    logger.debug(f"user {user}")
     # Extract user group (assuming it's the 3rd column in the tuple)
     user_group = user[0]  
 
     # Reject if user_group is invalid
     allowed_groups = {"tprp_admin", "general", "super_admin"}
-    print("user_group", user_group)
+    logger.debug(f"user_group {user_group}")
     if user_group not in allowed_groups:
-        logger.warning(f"Unauthorized access attempt with invalid user_group: {user_group}")
+        logger.error(f"Unauthorized access attempt with invalid user_group: {user_group}")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Invalid user group"

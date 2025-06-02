@@ -1,12 +1,14 @@
 from typing import Dict
 
 from fastapi import  HTTPException, status
+from app.core.config import get_settings
 from app.core.utils.db_utils import *
 import pandas as pd
 import uuid
 import io
 from app.models import *
 import pycountry
+from app.schemas.logger import logger
 
 def validate_and_update_data(data, user_id, session_id):
     """
@@ -49,8 +51,8 @@ def validate_and_update_data(data, user_id, session_id):
         # Update the data with the new prefixed row
         data[index - 1] = prefixed_row
 
-    print("All rows are valid and updated with prefixed keys, ens_id, and session_id.")
-    print("data_validate_and_update_data", data)
+    logger.debug("All rows are valid and updated with prefixed keys, ens_id, and session_id.")
+    logger.debug(f"data_validate_and_update_data {data}")
     
     return data
 
@@ -64,14 +66,13 @@ def get_country_code_optimized(country_name):
     country_cache[country_name] = country.alpha_2 if country else country_name  # Keep original if not found
     return country_cache[country_name]
 
-async def process_excel_file(file_contents, current_user, session) -> Dict:
+async def process_excel_file(file_contents, client_id, current_user, session) -> Dict:
     try:
         contents = await file_contents.read()
         excel_file = io.BytesIO(contents)
         df = pd.read_excel(excel_file)
         df = df.where(pd.notnull(df), "")  
-        # Check if the row count exceeds 100
-        allowed_rows = 100
+        allowed_rows = get_settings().allowedrows.general
         if len(df) > allowed_rows:
             raise ValueError(f"Only {allowed_rows} rows are allowed. Please upload a valid file.")
         df['country_copy'] = df['country']    
@@ -101,6 +102,11 @@ async def process_excel_file(file_contents, current_user, session) -> Dict:
             response = await upsert_session_screening_status(data, session_id, session)
             if response.get("message") == "Upsert completed":
                 res["session_screening_status"] = "Updated"
+            
+            # Call the function to update session configuration
+            response = await upsert_session_config(client_id, session_id, session)
+            if response.get("message") == "Upsert completed":
+                res["session_configuration_status"] = "Updated"
         except Exception as error:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -181,7 +187,7 @@ async def get_session_supplier(sess_id, page_no, rows_per_page, final_validation
         )
 async def update_suggestions_bulk(payload, session) -> Dict:
     try:
-        print("update_suggestions_bulk",type(payload))
+        logger.debug(f"update_suggestions_bulk: {type(payload)}")
         # Validate input payload
         if not payload.session_id:
             raise HTTPException(
@@ -205,7 +211,7 @@ async def update_suggestions_bulk(payload, session) -> Dict:
             .values(final_status=FinalStatus.ACCEPTED)
         )
         accepted_rows = await session.execute(accept_match_query)
-        print("Accepted Rows with MATCH status:", accepted_rows.rowcount)
+        logger.info(f"Accepted Rows with MATCH status: {accepted_rows.rowcount}")
 
         reject_match_query = (
             update(table_class)
@@ -214,7 +220,7 @@ async def update_suggestions_bulk(payload, session) -> Dict:
             .values(final_status=FinalStatus.REJECTED)
         )
         rejected_rows = await session.execute(reject_match_query)
-        print("Accepted Rows with MATCH status:", rejected_rows.rowcount)
+        logger.info(f"Accepted Rows with MATCH status: {rejected_rows.rowcount}")
 
         # Step 2: Reject all others unless explicitly accepted in the payload
         final_response = (
@@ -244,7 +250,7 @@ async def update_suggestions_bulk(payload, session) -> Dict:
         )
 
         result = await session.execute(reject_or_accept_others_query)
-        print("Updated Rows (Non-MATCH statuses):", result.rowcount)
+        logger.info(f"Updated Rows (Non-MATCH statuses): {result.rowcount}")
 
 
         if (accepted_rows.rowcount + result.rowcount):
@@ -306,7 +312,7 @@ async def update_suggestions_single(payload, session_id, session: AsyncSession) 
                 detail="No session_id provided."
             )
 
-        print("Payload:", payload)
+        logger.debug(f"Payload: {payload}")
 
         # Step 2: Fetch all rows for the session_id
         query = select(table_class).where(table_class.c.session_id == session_id)
@@ -326,7 +332,7 @@ async def update_suggestions_single(payload, session_id, session: AsyncSession) 
             .values(final_status=FinalStatus.ACCEPTED)
         )
         accepted_rows = await session.execute(accept_match_query)
-        print("Accepted Rows with MATCH status:", accepted_rows.rowcount)
+        logger.info(f"Accepted Rows with MATCH status: {accepted_rows.rowcount}")
 
         reject_match_query = (
             update(table_class)
@@ -335,7 +341,7 @@ async def update_suggestions_single(payload, session_id, session: AsyncSession) 
             .values(final_status=FinalStatus.REJECTED)
         )
         rejected_rows = await session.execute(reject_match_query)
-        print("Accepted Rows with MATCH status:", rejected_rows.rowcount)
+        logger.info(f"Accepted Rows with MATCH status: {rejected_rows.rowcount}")
         # Step 3: Fetch accepted ens_ids from DB
         accepted_rows_query = (
             select(table_class.c.ens_id)
@@ -346,7 +352,7 @@ async def update_suggestions_single(payload, session_id, session: AsyncSession) 
         ac_ens_ids = result_rows_query.fetchall()
         accepted_ens_ids = list({row[0] for row in ac_ens_ids})  # Unique ens_ids
 
-        print("Accepted ens_ids from DB:", accepted_ens_ids)
+        logger.debug(f"Accepted ens_ids from DB: {accepted_ens_ids}")
 
         # Step 4: Convert to list of dictionaries for further processing
         column_names = result.keys()
@@ -387,7 +393,7 @@ async def update_suggestions_single(payload, session_id, session: AsyncSession) 
 
         # Step 7: Update rejected ens_ids (including those not in accepted_ensid)
         all_ens_ids = {str(row["ens_id"]) for row in data_dicts}  # Convert to string
-        print("all_ens_ids", all_ens_ids)
+        logger.debug(f"all_ens_ids {all_ens_ids}")
         # Include already accepted ens_ids from DB
         if accepted_ens_ids:
             accepted_ensid.update(accepted_ens_ids)
@@ -405,13 +411,13 @@ async def update_suggestions_single(payload, session_id, session: AsyncSession) 
         # Step 8: Commit the transaction
         await session.commit()
 
-        print("Final Accepted ens_ids:", accepted_ensid)
-        print("Final Rejected ens_ids:", reject_ensid)
+        logger.debug(f"Final Accepted ens_ids: {accepted_ensid}")
+        logger.debug(f"Final Rejected ens_ids: {reject_ensid}")
 
         # Step 9: Update supplier master data
         if len(list(accepted_ensid)):
             response_supplier_master_data = await update_supplier_master_data(session, session_id)
-            print("Response from update_supplier_master_data:", response_supplier_master_data)
+            logger.debug(f"Response from update_supplier_master_data: {response_supplier_master_data}")
 
         # Return the response
         return {
@@ -425,7 +431,7 @@ async def update_suggestions_single(payload, session_id, session: AsyncSession) 
         raise http_err  # Propagate HTTP exceptions
 
     except Exception as error:
-        print(f"Unexpected error: {error}")
+        logger.error(f"Unexpected error: {error}")
         raise HTTPException(
             status_code=500, 
             detail=f"An unexpected error occurred: {str(error)}"
@@ -433,12 +439,12 @@ async def update_suggestions_single(payload, session_id, session: AsyncSession) 
         
 async def get_main_session_supplier(sess_id, page_no, rows_per_page, session) -> Dict:
     try:
-        print("sess_id", sess_id)
+        logger.debug(f"get_main_session_supplier for session_id: {sess_id}")
 
         # Calculate offset and limit based on page_no and rows_per_page
         offset = (page_no-1) * rows_per_page if page_no else 0
         limit = rows_per_page if rows_per_page else 10000
-        print("offset", offset, "limit", limit)
+        logger.debug(f"offset {offset} limit {limit}")
         extra_filters = {"offset": offset, "limit": limit}
 
         select_column = [
@@ -456,7 +462,7 @@ async def get_main_session_supplier(sess_id, page_no, rows_per_page, session) ->
             extra_filters=extra_filters
         )
 
-        print("session_supplier_data", session_supplier_data)
+        logger.debug(f"session_supplier_data {session_supplier_data}")
 
         # If no data is found, return a 404 response
         if not session_supplier_data or not session_supplier_data[0]:
@@ -478,9 +484,123 @@ async def get_main_session_supplier(sess_id, page_no, rows_per_page, session) ->
         raise http_err  # Re-raise HTTP exceptions for proper FastAPI handling
 
     except Exception as error:
-        print(f"Unexpected error: {error}")
+        logger.error(f"Unexpected error: {error}")
         raise HTTPException(
             status_code=500,
+            detail=f"An unexpected error occurred: {str(error)}"
+        )
+    
+async def get_main_session_supplier_compiled(sess_id, page_no, rows_per_page, session) -> Dict:
+    try:
+        logger.debug(f"get_main_session_supplier for session_id: {sess_id}")
+
+        offset = (page_no - 1) * rows_per_page if page_no else 0
+        limit = rows_per_page if rows_per_page else 10000
+        logger.debug(f"Pagination — offset: {offset}, limit: {limit}")
+
+        try:
+            supplier_table = Base.metadata.tables.get("supplier_master_data")
+            ensid_screening__table = Base.metadata.tables.get("ensid_screening_status")
+
+            if supplier_table is None or ensid_screening__table is None :
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Table 'supplier_master_data' or 'ensid_screening_status' does not exist in the database schema."
+                )
+        except Exception as e:
+            logger.error(f"Metadata lookup error: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to load table metadata."
+            )
+
+        try:
+            supplier_columns = [
+                col for col in supplier_table.c
+                if col.name not in ("report_generation_status")
+            ]
+            screening_columns = [col for col in ensid_screening__table.c if col.name not in ("id", "session_id", "ens_id", "create_time", "update_time")]
+
+            join_query = (
+                select(*supplier_columns, *screening_columns)
+                .select_from(
+                    supplier_table.join(
+                        ensid_screening__table,
+                        and_(
+                            supplier_table.c.session_id == ensid_screening__table.c.session_id,
+                            supplier_table.c.ens_id == ensid_screening__table.c.ens_id
+                        )
+                    )
+                )
+                .where(supplier_table.c.session_id == sess_id)
+                .order_by(supplier_table.c.update_time.desc(), supplier_table.c.id.desc())
+                .offset(offset)
+                .limit(limit)
+            )
+
+            result = await session.execute(join_query)
+            rows = result.fetchall()
+            columns = result.keys()
+            formatted_res = [dict(zip(columns, row)) for row in rows]
+        except Exception as e:
+            logger.error(f"Query execution or formatting failed: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to fetch or format joined data."
+            )
+
+        if not formatted_res:
+            logger.warning(f"No data found for session_id: {sess_id}")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"No data found for session_id: {sess_id}"
+            )
+
+        try:
+            count_query = (
+                select(func.count())
+                .select_from(
+                    supplier_table.join(
+                        ensid_screening__table,
+                        and_(
+                            supplier_table.c.session_id == ensid_screening__table.c.session_id,
+                            supplier_table.c.ens_id == ensid_screening__table.c.ens_id
+                        )
+                    )
+                )
+                .where(supplier_table.c.session_id == sess_id)
+            )
+            count_result = await session.execute(count_query)
+            total_count = count_result.scalar()
+        except Exception as e:
+            logger.error(f"Count query failed: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to retrieve total record count."
+            )
+
+        return {
+            "status": "success",
+            "total_data": total_count,
+            "data": formatted_res,
+            "session_id": sess_id
+        }
+
+    except HTTPException as http_err:
+        logger.warning(f"HTTPException: {http_err.detail}")
+        raise http_err
+
+    except SQLAlchemyError as sa_err:
+        logger.error(f"SQLAlchemy error: {sa_err}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Database error: {str(sa_err)}"
+        )
+
+    except Exception as error:
+        logger.error(f"Unexpected error: {error}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"An unexpected error occurred: {str(error)}"
         )
     
@@ -489,7 +609,7 @@ async def get_session_screening_status(page_no: int, rows_per_page: int, screeni
         # Calculate offset and limit based on page_no and rows_per_page
         offset = (page_no-1) * rows_per_page if page_no else 0
         limit = rows_per_page if rows_per_page else 10000
-        print("offset", offset, "limit", limit)
+        logger.debug(f"offset {offset} limit {limit}")
         extra_filters = {"offset": offset, "limit": limit, "screening_analysis_status": screening_analysis_status}
 
         select_column = [
@@ -508,7 +628,7 @@ async def get_session_screening_status(page_no: int, rows_per_page: int, screeni
             extra_filters=extra_filters
         )
 
-        print("session_screening_status_data", session_screening_status_data)
+        logger.debug(f"session_screening_status_data {session_screening_status_data}")
 
         # Handle case where no data is found
         if not session_screening_status_data[0]:
@@ -527,7 +647,7 @@ async def get_session_screening_status(page_no: int, rows_per_page: int, screeni
         raise http_err  # Re-raise HTTP exceptions to keep proper status codes
 
     except Exception as error:
-        print(f"Unexpected error: {error}")
+        logger.error(f"Unexpected error: {error}")
         raise HTTPException(
             status_code=500, 
             detail=f"Failed to retrieve screening status data: {str(error)}"
@@ -563,3 +683,94 @@ async def get_nomatch_count(sess_id, session) -> Dict:
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
             detail=f"Error retrieving session supplier data: {str(error)}"
         )
+
+
+async def client_config(client_configuration, session) -> Dict:
+    try:
+        # Get the table class dynamically
+        table_class = Base.metadata.tables.get("client_configuration")
+        if table_class is None:
+            raise ValueError(f"Table 'client_configuration' does not exist in the database schema.")
+        client_id_ = str(uuid.uuid4())
+        # Collect upserted records here
+        upserted_records = []
+
+        for i in range(len(client_configuration.data)):
+            user_data = {
+                'client_id': client_id_,
+                'client_name': client_configuration.client_name,
+                'kpi_theme': client_configuration.data[i].kpi_theme,
+                'report_section': client_configuration.data[i].report_section,
+                'kpi_area': client_configuration.data[i].kpi_area,
+                'module_enabled_status': client_configuration.data[i].module_enabled_status
+            }
+            
+            stmt = insert(table_class).values(**user_data)
+            
+            stmt = stmt.on_conflict_do_update(
+                index_elements=[
+                    'client_id',
+                    'client_name',
+                    'kpi_theme',
+                    'report_section',
+                    'kpi_area'
+                ],
+                set_={
+                    'module_enabled_status': stmt.excluded.module_enabled_status
+                }
+            )
+            
+            # Execute
+            await session.execute(stmt)
+            
+            # Add to upserted record
+            upserted_records.append(user_data)
+
+        # Commit once after all upserts
+        await session.commit()
+        _root_node = {}
+        if client_configuration.require_graph:
+            head_graph = await default_head_graph(client_id_, session)
+
+            if head_graph["status"] == 'pass':
+                _root_node = {
+                    "graph": STATUS.COMPLETED,
+                    "id": head_graph["client_id"] 
+                }
+            elif head_graph["status"] == 'fail':
+                _root_node = {
+                    "graph": STATUS.FAILED,
+                    "id": None
+                }
+        else:
+            _root_node = {
+                    "graph": "Do not require graph",
+                }
+        # print("_root_node", _root_node)
+
+        # Return clean structured response
+        return {
+            "message": "Upsert completed successfully",
+            "data": upserted_records,
+            "root_node": _root_node
+        }
+    except ValueError as ve:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid file format: {str(ve)}"
+        )
+
+    except HTTPException as http_err:
+        raise http_err  # Re-raise FastAPI HTTP exceptions
+
+    except SQLAlchemyError as sa_err:
+        # Handle SQLAlchemy-specific errors
+        logger.error(f"Database error: {sa_err}")
+        return {"error": "Database error", "status": "failure"}
+    
+    except Exception as error:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error processing client config: {str(error)}"
+        )
+

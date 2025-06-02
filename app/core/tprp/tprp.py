@@ -15,6 +15,7 @@ from app.models import *
 from azure.storage.blob import BlobServiceClient, generate_blob_sas, BlobSasPermissions
 from datetime import datetime, timedelta
 from azure.storage.blob import generate_container_sas, ContainerSasPermissions, BlobClient
+from app.schemas.logger import logger
 
 def validate_and_update_data(data, user_id, session_id):
     """
@@ -57,8 +58,8 @@ def validate_and_update_data(data, user_id, session_id):
         # Update the data with the new prefixed row
         data[index - 1] = prefixed_row
 
-    print("All rows are valid and updated with prefixed keys, ens_id, and session_id.")
-    print("data_validate_and_update_data", data)
+    logger.debug("All rows are valid and updated with prefixed keys, ens_id, and session_id.")
+    logger.debug(f"data_validate_and_update_data {data}")
     
     return data
 
@@ -74,9 +75,9 @@ def get_country_code_optimized(country_name):
 
 async def process_excel_file(file_contents, current_user, session) -> Dict:
     try:
-        print("current_user_id", current_user)
+        logger.info(f"TPRP process request for, {current_user}")
         validate_request = await validate_user_request(current_user, session)
-        print("validate_request:", validate_request)
+        logger.debug(f"validate_request: {validate_request}")
 
         if validate_request > 5:
             raise ValueError("Maximum 5 requests can run at one time")
@@ -84,8 +85,7 @@ async def process_excel_file(file_contents, current_user, session) -> Dict:
         excel_file = io.BytesIO(contents)
         df = pd.read_excel(excel_file)
         df = df.where(pd.notnull(df), "")  
-        # Check if the row count exceeds 25
-        allowed_rows = 25
+        allowed_rows = get_settings().allowedrows.tprp
         if len(df) > allowed_rows:
             raise ValueError(f"Only {allowed_rows} rows are allowed. Please upload a valid file.")
         df['country_copy'] = df['country']    
@@ -209,21 +209,21 @@ def trigger_analysis(session_id: str, auth_token: str):
 async def run_full_pipeline_background(session_id, session):
     try:
         # Take session ID
-        print("sheet_data_run_full_pipeline_background", session_id)
+        logger.info(f"Starting run_full_pipeline_background for {session_id}")
         
         try:
             # Generate JWT token
             jwt_token = create_jwt_token("application_backend", "development")
         except Exception as e:
-            print("Error generating JWT token:", e)
+            logger.error(f"Error generating JWT token: {str(e)}")
             raise
 
         try:
             # Step 1: Make HTTP request to trigger supplier name validation
             trigger_supplier_validation_response = trigger_supplier_validation(session_id, jwt_token.access_token)
-            print("response", trigger_supplier_validation_response)
+            logger.info(f"Trigger Name Validation Response {trigger_supplier_validation_response}")
         except Exception as e:
-            print("Error triggering supplier validation:", e)
+            logger.error(f"Error triggering supplier validation:{str(e)}")
             raise
         extra_filters = {"offset": 0, "limit": 10}
 
@@ -244,33 +244,39 @@ async def run_full_pipeline_background(session_id, session):
                 )
                 supplier_status = session_screening_status_data[0][0]['supplier_name_validation_status']
 
-                print("session_screening_status_data______", session_screening_status_data)
-                print(f"Current supplier validation status: {supplier_status}")
+                logger.debug(f"session_screening_status_data______ {session_screening_status_data}")
+                logger.debug(f"Current supplier validation status: {supplier_status}")
                 # Convert Enum to string (extract actual status value)
                 if isinstance(supplier_status, STATUS):  # If it's an Enum, get its value
                     supplier_status = supplier_status.value
                 else:
                     supplier_status = str(supplier_status)  # Fallback conversion
-                print(f"Current supplier validation status: {supplier_status}")
+                logger.debug(f"Current supplier validation status: {supplier_status}")
                 # print("session_screening_status_data[0]", session_screening_status_data[0])
                 # supplier_status = session_screening_status_data[0].get('supplier_name_validation_status', '')
                 # print("Supplier Status:", supplier_status)
                 if supplier_status == "COMPLETED":
-                    print(f"Supplier validation completed: {supplier_status}")
+                    logger.info(f"Supplier validation completed: {supplier_status}")
                     break  # Exit loop and proceed to Step 3
+                if supplier_status == "FAILED":
+                    try:
+                        raise RuntimeError("Supplier status is FAILED: Error triggering analysis pipeline.")
+                    except Exception as e:
+                        logger.error(f"Error in analysis pipeline: {str(e)}")
+                        raise
 
-                print(f"Current status: {supplier_status}. Waiting for completion...")
+                logger.info(f"Current status: {supplier_status}. Waiting for completion...")
  
                 if retry_count >= max_retries:
-                    print("Max retries reached. Supplier validation did not complete.")
+                    logger.error("Max retries reached. Supplier validation did not complete.")
                     raise TimeoutError("Supplier validation timeout exceeded.")
 
                 retry_count += 1
-                print(f"Retrying... Attempt {retry_count}/{max_retries}")
+                logger.info(f"Retrying... Attempt {retry_count}/{max_retries}")
                 await asyncio.sleep(30)  # Wait for 30 sec before retrying
 
             except Exception as e:
-                print("Error polling session status:", e)
+                logger.error(f"Error polling session status: {str(e)}")
                 raise
 
         # Step 3: Bulk accept all suggestions for this session_id
@@ -279,26 +285,54 @@ async def run_full_pipeline_background(session_id, session):
             "status": "accept"
         }
         
-        print("Bulk Payload:", bulk_payload)
+        logger.info(f"Bulk Payload: {bulk_payload}")
 
         try:
             # Call the function to update suggestions in bulk
             accept_status = await update_suggestions_bulk(BulkPayload(**bulk_payload), session)
-            print("accept_status", accept_status)
+            logger.debug(f"accept_status {accept_status}")
         except Exception as e:
-            print("Error updating suggestions in bulk:", e)
+            logger.error(f"Error updating suggestions in bulk: {str(e)}")
             raise
+        
+        # Check supplier_master have that session_id or not  if not then update session_screening_status->over_all : FAILED and exit
+        supplier_master_data = await get_dynamic_ens_data(
+                    table_name="supplier_master_data",
+                    required_columns=["session_id"],
+                    ens_id="",
+                    session_id=session_id,
+                    session=session
+                )
+        # logger.debug(f"supplier_master_data {supplier_master_data}")
+        if supplier_master_data and len(supplier_master_data):
+            pass
+        else: 
+            data = [{
+                "overall_status": STATUS.FAILED
+            }]
 
+            try:
+                # Call the function to update session screening status
+                response = await upsert_session_screening_status(data, session_id, session)
+                if response.get("message") == "Upsert completed":
+                    logger.error("Supplier status is FAILED: Error supplier_master_data pipeline.")
+                    raise RuntimeError("Supplier status is FAILED: Error supplier_master_data pipeline.")
+            except Exception as error:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"Error updating session screening status: {str(error)}"
+                )
+            
         try:
             # Trigger analysis pipeline
             trigger_analysis_response = trigger_analysis(session_id, jwt_token.access_token)
-            print("Analysis pipeline triggered successfully:", trigger_analysis_response)
+            logger.info(f"Analysis pipeline triggered successfully: {trigger_analysis_response}")
         except Exception as e:
-            print("Error triggering analysis pipeline:", e)
+            logger.error(f"Error triggering analysis pipeline:{str(e)}")
             raise
 
     except Exception as e:
-        print("Pipeline execution failed:", e)
+        logger.error(f"Pipeline execution failed:{str(e)}")
 
 
 def generate_container_sas_url(storage_account_name, storage_account_key, container_name, expiry_weeks):
@@ -328,7 +362,7 @@ def generate_container_sas_url(storage_account_name, storage_account_key, contai
     storage_account_url = f"https://{storage_account_name}.blob.core.windows.net/{container_name}"
     sas_url = f"{storage_account_url}?{sas_token}&comp=list&restype=container"
 
-    print("Generated SAS URL:", sas_url)
+    logger.debug(f"Generated SAS URL: {sas_url}")
     # blob_client = BlobClient.from_blob_url(sas_url)
     # try:     
     #     blob_properties = blob_client.get_blob_properties()    
@@ -367,7 +401,7 @@ async def get_session_screening_status_static(
         storage_account_name = get_settings().storage.storage_account_name
         storage_account_key = get_settings().storage.storage_account_key
         session_sas = generate_container_sas_url(storage_account_name, storage_account_key, session_id, 2)
-        print("SAS URL:", session_sas)
+        logger.debug(f"SAS URL: {session_sas}")
         # sas_url = generate_sas_url(storage_account_name, storage_account_key, session_id)
         # print("Generated SAS URL:", sas_url)
         formatted_res = [
@@ -381,21 +415,21 @@ async def get_session_screening_status_static(
         # Return the formatted result
         await session.close()
 
-        print("______merged_data_____", merged_data)
+        logger.debug(f"______merged_data_____ {merged_data}")
     
         return merged_data
 
     except ValueError as ve:
         # Handle the case where the table does not exist
-        print(f"Error: {ve}")
+        logger.error(f"Error: {ve}")
         return []
 
     except SQLAlchemyError as sa_err:
         # Handle SQLAlchemy-specific errors
-        print(f"Database error: {sa_err}")
+        logger.error(f"Database error: {sa_err}")
         return []
 
     except Exception as e:
         # Catch any other exceptions
-        print(f"An unexpected error occurred: {e}")
+        logger.error(f"An unexpected error occurred: {e}")
         return []

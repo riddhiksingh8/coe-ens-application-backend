@@ -1,4 +1,4 @@
-from typing import Dict, Literal
+from typing import Dict, List, Literal, Optional
 from pydantic import BaseModel, EmailStr
 
 
@@ -18,7 +18,22 @@ class UserLoginRequest(BaseRequest):
     email: str
     password: str
 
-
+class SupplierFilterRequest(BaseModel):
+    client: str = "Aramco"
+    client_id: Optional[str] = None
+    country: Optional[list] = None
+    overall_rating: Optional[list] = None
+    sanctions_rating: Optional[list] = None
+    government_political_rating: Optional[list] = None
+    bribery_corruption_overall_rating: Optional[list] = None
+    other_adverse_media_rating: Optional[list] = None
+    financials_rating: Optional[list] = None
+    additional_indicator_rating: Optional[list] = None
+    national_id: Optional[str] = None
+    name: Optional[str] = None
+    filter_multiple_connections_direct: Optional[bool] = False
+    filter_multiple_connections_indirect: Optional[bool] = False
+    submodal_id: Optional[str] = None
 
 class UserCreateRequest(BaseRequest):
     email: EmailStr
@@ -37,3 +52,16 @@ class BulkPayload(BaseModel):
 class SinglePayloadItem(BaseModel):
     ens_id: str
     status: Literal["accept", "reject"]  # Status must be "accept" or "reject"
+
+class SubModalItem(BaseModel):
+    ens_id: str
+
+class ClientConfigurationData(BaseRequest):
+    kpi_theme: str
+    report_section: str
+    kpi_area: str
+    module_enabled_status: bool
+class ClientConfigurationRequest(BaseModel):
+    client_name: str
+    data : List[ClientConfigurationData]
+    require_graph: Literal[True, False]

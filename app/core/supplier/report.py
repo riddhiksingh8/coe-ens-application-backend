@@ -6,6 +6,7 @@ import io
 from app.core.config import get_settings  # Import settings
 from azure.storage.blob import BlobServiceClient
 import zipfile
+from app.schemas.logger import logger
 
 async def report_download(session_id: str, ens_id: str, type_of_file: str)->Dict:
     try:
@@ -52,6 +53,7 @@ async def report_download(session_id: str, ens_id: str, type_of_file: str)->Dict
     
     
     except Exception as e:
+        logger.error(f"Error in report_download: {str(e)}")
         return {"error": str(e)}
     
 
@@ -88,5 +90,6 @@ async def report_bulk_download(session_id: str) -> Dict:
         return zip_buffer.getvalue(), f"{session_id}.zip"
 
     except Exception as e:
+        logger.error(f"Error in report_bulk_download: {str(e)}")
         return {"error": str(e)}
         

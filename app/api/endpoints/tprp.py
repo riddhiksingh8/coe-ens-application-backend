@@ -3,6 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.schemas.responses import *
 from app.core.tprp.tprp import *
 from app.api import deps
+from app.schemas.logger import logger
 
 router = APIRouter()
 @router.post(
@@ -108,11 +109,11 @@ async def get_sessionid_status_poll(
     :return:
     """
     try:
-        print("session_id", session_id)
+        logger.debug(f"session_id, {session_id}")
 
         initial_state = await get_session_screening_status_static(session_id, db_session)
 
-        print(initial_state)
+        logger.debug(f"{initial_state}")
 
         return {"status": "", "data": initial_state, "message": ""}
 

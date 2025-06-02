@@ -1,12 +1,13 @@
 from typing import List, Literal, Optional
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.schemas.requests import BulkPayload, SinglePayloadItem
+from app.schemas.requests import BulkPayload, ClientConfigurationRequest, SinglePayloadItem
 from app.schemas.responses import *
 from app.core.supplier.supplier import *
 from app.api import deps
 import pandas as pd
 import io
+from app.schemas.logger import logger
 
 router = APIRouter()
 
@@ -18,7 +19,10 @@ router = APIRouter()
 #     return current_user
 
 @router.post("/upload-excel", response_model=ResponseMessage, status_code=status.HTTP_201_CREATED)
-async def upload_excel(file: UploadFile = File(...), session: AsyncSession = Depends(deps.get_session),
+async def upload_excel(
+    client_id: Optional[str] = Query(None),
+    file: UploadFile = File(...),
+    session: AsyncSession = Depends(deps.get_session),
     current_user_id: User = Depends(deps.get_current_user),
 ):
     try:
@@ -29,8 +33,8 @@ async def upload_excel(file: UploadFile = File(...), session: AsyncSession = Dep
                 detail="No file uploaded"
             )
         
-
-        sheet_data = await process_excel_file(file, current_user_id, session)
+        client_id = '5b638302-73cb-4a69-b76d-1efa5c00797a'
+        sheet_data = await process_excel_file(file, client_id,current_user_id, session)
         response = ResponseMessage(
             status="success",
             data=sheet_data,  
@@ -162,7 +166,7 @@ async def accept_suggestions_single(
         raise http_err  # Re-raise FastAPI-specific HTTP exceptions
 
     except Exception as error:
-        print(f"Unexpected error: {error}")
+        logger.error(f"Unexpected error: {error}")
         raise HTTPException(
             status_code=500, 
             detail=f"An unexpected error occurred: {str(error)}"
@@ -198,7 +202,44 @@ async def get_main_supplier_data(
         raise http_err  # Re-raise HTTP exceptions to maintain proper status codes
 
     except Exception as error:
-        print(f"Unexpected error: {error}")
+        logger.error(f"Unexpected error: {error}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to retrieve data: {str(error)}"
+        ) 
+
+ 
+@router.get("/get-main-supplier-data-compiled", response_model=ResponseMessage)
+async def get_main_supplier_data_compiled(
+    session_id: str, 
+    page_no: int = Query(1, ge=1),       
+    rows_per_page: int = Query(10, le=1000), 
+    session: AsyncSession = Depends(deps.get_session),
+    current_user: User = Depends(deps.get_current_user)
+):
+    try:
+        # Validate session_id
+        if not session_id:
+            raise HTTPException(status_code=400, detail="No session_id provided.")
+
+        # Fetch supplier data
+        sheet_data = await get_main_session_supplier_compiled(session_id, page_no, rows_per_page, session)
+
+        # If no data found, raise a 404 error
+        if not sheet_data.get("data"):
+            raise HTTPException(status_code=404, detail=f"No supplier data found for session_id: {session_id}")
+
+        return ResponseMessage(
+            status="success",
+            data=sheet_data,  # Include data as a dictionary
+            message="Successfully retrieved data."
+        )
+
+    except HTTPException as http_err:
+        raise http_err  # Re-raise HTTP exceptions to maintain proper status codes
+
+    except Exception as error:
+        logger.error(f"Unexpected error: {error}")
         raise HTTPException(
             status_code=500,
             detail=f"Failed to retrieve data: {str(error)}"
@@ -234,7 +275,7 @@ async def get_session_screening_status_data(
         raise http_err
 
     except Exception as error:
-        print(f"Unexpected error: {error}")
+        logger.error(f"Unexpected error: {error}")
         raise HTTPException(
             status_code=500,
             detail=f"Failed to retrieve data: {str(error)}"
@@ -272,5 +313,67 @@ async def get_nomatch(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to retrieve data: {str(error)}"
         )
-   
-  
+ 
+ 
+@router.post(
+    "/client-configuration",
+    description="Client Configuration",
+    status_code=status.HTTP_201_CREATED,
+)
+async def client_configuration(
+    client_configuration: ClientConfigurationRequest,
+    current_user_id: User = Depends(deps.get_current_user),
+    session: AsyncSession = Depends(deps.get_session)
+):
+    try:
+        client_config_response = await client_config(client_configuration, session)
+        response = ResponseMessage(
+            status="success",
+            data=client_config_response,  
+            message="Client config processed successfully"
+        )
+        return response
+
+    except HTTPException as http_err:
+        # Return structured error responses for HTTP exceptions
+        raise http_err
+
+    except Exception as error:
+        # Handle unexpected errors
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to processing client config: {str(error)}"
+        ) 
+    
+
+# @router.post(
+#     "/session-configuration",
+#     description="Session Configuration",
+#     status_code=status.HTTP_201_CREATED,
+# )
+# async def client_configuration(
+#     client_id: str,
+#     session_id: str,
+#     session: AsyncSession = Depends(deps.get_session)
+# ):
+#     try:
+#         session_config_response = await upsert_session_config(client_id, session_id,session)
+#         print("session_config_response", session_config_response)
+#         response = ResponseMessage(
+#             status="success",
+#             data=session_config_response,  
+#             message="Session config processed successfully"
+#         )
+#         return response
+
+#     except HTTPException as http_err:
+#         # Return structured error responses for HTTP exceptions
+#         raise http_err
+
+#     except Exception as error:
+#         # Handle unexpected errors
+#         raise HTTPException(
+#             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+#             detail=f"Failed to processing client config: {str(error)}"
+#         ) 
+    

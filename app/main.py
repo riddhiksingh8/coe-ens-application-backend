@@ -1,9 +1,12 @@
+import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
+from neo4j import AsyncGraphDatabase
 
 from app.api.api_router import api_router, auth_router
 from app.core.config import get_settings
+from app.schemas.logger import logger
 
 app = FastAPI(
     title="minimal fastapi postgres template",
@@ -33,3 +36,17 @@ app.add_middleware(
     TrustedHostMiddleware,
     allowed_hosts=get_settings().security.allowed_hosts,
 )
+
+
+@app.on_event("startup")
+async def startup_event():
+    try:
+        driver = AsyncGraphDatabase.driver(
+            os.environ.get("GRAPHDB__URI"),
+            auth=(os.environ.get("GRAPHDB__USER"), os.environ.get("GRAPHDB__PASSWORD")),
+        )
+        async with driver.session() as session:
+            await session.run("RETURN 1")
+        logger.info("Neo4j connection established.")
+    except Exception as e:
+        logger.warning(f"Failed to connect to Neo4j: {str(e)}")

@@ -40,10 +40,11 @@ class TruesightStatus(enum.Enum):
     NO_MATCH = "NO_MATCH"
 
 
-class STATUS(str, enum.Enum):  # Inherit from str to store values as text
+class STATUS(str, enum.Enum):  
+    QUEUED = "QUEUED" # Added new 
     NOT_STARTED = "NOT_STARTED"
     STARTED = "STARTED"
-    IN_PROGRESS = "IN_PROGRESS"  # Typo fix: "INPROGESS" → "IN_PROGRESS"
+    IN_PROGRESS = "IN_PROGRESS" 
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"
     PENDING = "PENDING"
@@ -99,8 +100,8 @@ class UserAccount(Base):
 class User(Base):
     __tablename__ = "users_table"
 
-    id = Column(Integer, primary_key=True, index=True)
-    user_id= Column( String, primary_key=True)
+    id = Column(Integer, autoincrement=True, index=True)
+    user_id= Column( String, primary_key=True, unique = True)
     email = Column(String, unique=True, nullable=False, index=True)
     username = Column(String, unique=True, nullable=False, index=True)
     password = Column(String, nullable=False)
@@ -305,6 +306,7 @@ class ExternalSupplierData(Base):
     default_events = Column(JSONB, nullable=True)
     orbis_news = Column(JSONB, nullable=True)
     operating_revenue_usd = Column(JSONB, nullable=True)
+    event = Column(JSONB, nullable=True)
     # Add the UniqueConstraint on the combination of ens_id and session_id
     __table_args__ = (
         UniqueConstraint('ens_id', 'session_id', name='unique_ens_session'),
@@ -394,7 +396,7 @@ class EnsidScreeningStatus(Base):
     report_generation_status = Column(SQLAlchemyEnum(STATUS), nullable=False, server_default=expression.literal(STATUS.NOT_STARTED.value))
     # Ensure unique constraint for (ens_id, session_id)
     __table_args__ = (
-        UniqueConstraint('ens_id', 'session_id', name='unique_ensid_session'),
+        UniqueConstraint('ens_id', 'session_id', name='unique_ensid_session_ensid_screening_status'),
     )
 class SessionScreeningStatus(Base):
     __tablename__ = "session_screening_status"
@@ -475,6 +477,7 @@ class NewsMaster(Base):
     country = Column(Text)
     start_date = Column (Date)
     end_date = Column(Date)
+    error = Column(Text, nullable=True)
     __table_args__ = (
         UniqueConstraint("name", "link", "news_date", name="unique_name_link_date"),
     )
@@ -491,3 +494,109 @@ class Summary(Base):
     __table_args__ = (
         UniqueConstraint("ens_id", "session_id", "area", name="unique_ens_session_summary"),
     )
+
+
+class ClientConfiguration(Base):
+    __tablename__ = "client_configuration"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    client_id = Column(String(50), nullable=False)
+    client_name = Column(String(250), nullable=True)
+    kpi_theme = Column(String(50), nullable=True)
+    report_section = Column(String(50), nullable=True)
+    kpi_area = Column(String, nullable=False)                  
+    module_enabled_status =  mapped_column(Boolean, nullable=False, default=False)
+
+    __table_args__ = (
+        UniqueConstraint("client_id", "client_name", "kpi_theme", "report_section", "kpi_area", name="unique_client_configuration"),
+    )
+
+
+class SessionConfiguration(Base):
+    __tablename__ = "session_configuration"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    client_id = Column(String(50), nullable=False)
+    session_id = Column(String(50), nullable=False)
+    module = Column(String(50), nullable=True)
+    module_active_status = mapped_column(Boolean, nullable=False, default=False)
+
+    __table_args__ = (
+        UniqueConstraint("session_id", "module", name="unique_session_configuration"),
+    )
+
+class TokenMonitor(Base):
+    __tablename__ = "token_monitor"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    usage_time = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    token_used = Column(Integer, nullable=False)
+    payload = Column(JSONB, nullable=True)
+    openai_model = Column(Text, nullable=True)
+
+class EntityUniverse(Base):
+    __tablename__ = "entity_universe"
+
+    id = Column(Integer, autoincrement=True)
+    ens_id = Column(String(50), primary_key=True)
+    bvd_id = Column(String(50), nullable=True)
+    name = Column(String(255), nullable=True)
+    name_international = Column(String(255), nullable=True)
+    address = Column(Text, nullable=True)
+    postcode = Column(String(20), nullable=True)
+    city = Column(String(100), nullable=True)
+    country = Column(String(100), nullable=True)
+    phone_or_fax = Column(String(50), nullable=True)
+    email_or_website = Column(String(100), nullable=True)
+    national_id = Column(String(50), nullable=True)
+    state = Column(String(100), nullable=True)
+    address_type = Column(String(50), nullable=True)
+    last_session_id = Column(String(50), nullable=True)
+    overall_supplier_rating = Column(String(50), nullable=True)
+    thematic_rating = Column(JSONB, nullable=True)
+
+class WebhookResponse(Base):
+    __tablename__ = "webhook_response"
+
+    id = Column(Integer,  primary_key=True, autoincrement=True)
+    response = Column(String(50))
+    response_time = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+class GridPMTracking(Base):
+    __tablename__ = "grid_PM_tracking"
+
+    id = Column(Integer, autoincrement=True)
+    grid_tracking_id = Column(String, primary_key=True)
+    category = Column(String)
+    grid_enquiry_id = Column(String)
+    primary_id = Column(String)
+
+class ManagementAssociation(Base):
+    __tablename__ = "management_association"
+
+    id = Column(Integer, autoincrement=True)
+    contact_id = Column(String, primary_key=True)
+    name = Column(String)
+    associated_ens_id = Column(ARRAY(String))
+
+class EnsContinuousMonitoring(Base):
+    __tablename__ = "ens_continuous_monitoring"
+
+    id = Column(Integer, autoincrement=True)
+    ens_id = Column(String(50), primary_key=True)
+    group_id = Column(String(50))
+    last_screened_time = Column(DateTime)
+    name = Column(String(255))
+    name_international = Column(String(255))
+    address = Column(Text)
+    postcode = Column(String(20))
+    city = Column(String(100))
+    country = Column(String(100))
+    phone_or_fax = Column(String(50))
+    email_or_website = Column(String(100))
+    national_id = Column(String(50))
+    state = Column(String(100))
