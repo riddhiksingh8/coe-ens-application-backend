@@ -1,14 +1,15 @@
 from typing import List, Literal, Optional
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.schemas.requests import BulkPayload, ClientConfigurationRequest, SinglePayloadItem
+from pydantic import BaseModel, Field
+from app.schemas.requests import BulkPayload, ClientConfigurationRequest, SinglePayloadItem, SessionCreationRequest
 from app.schemas.responses import *
 from app.core.supplier.supplier import *
 from app.api import deps
 import pandas as pd
 import io
 from app.schemas.logger import logger
-
+from app.schemas.requests import *
 router = APIRouter()
 
 
@@ -343,8 +344,76 @@ async def client_configuration(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to processing client config: {str(error)}"
-        ) 
-    
+        )
+
+
+@router.post("/create-session", response_model=SessionCreationResponse, status_code=status.HTTP_201_CREATED)
+async def create_session_api(
+    request: SessionCreationRequest,
+    current_user=Depends(deps.get_current_user),
+    session: AsyncSession = Depends(deps.get_session)
+):
+
+    return await create_session_from_ens_ids_with_session(
+        ens_ids=request.ens_ids,
+        session_id=request.session_id,
+        source=request.source,
+        source_id=request.source_id,
+        current_user=current_user,
+        session=session
+    )
+
+
+@router.post("/process-ens-id", response_model=ENSProcessingResponse)
+async def process_ens_id(
+        request: ENSProcessingRequest,
+        current_user=Depends(deps.get_current_user),
+        session: AsyncSession = Depends(deps.get_session)
+):
+    """
+    API endpoint to process ENS IDs and create a session.
+    """
+    try:
+        session_id = str(uuid.uuid4())
+        logger.info(f"Generated session_id: {session_id} for user: {request.user_id}")
+
+        if not request.ens_ids:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="ENS IDs list cannot be empty"
+            )
+
+        result = await create_session_from_ens_ids_with_session(
+            ens_ids=request.ens_ids,
+            session_id=session_id,
+            source="OD",
+            source_id=request.user_id,
+            current_user=current_user,
+            session=session
+        )
+
+        response = ENSProcessingResponse(
+            session_id=result["session_id"],
+            rows_inserted=result["rows_inserted"],
+            session_screening_status=result["session_screening_status"],
+            ens_ids_processed=result["ens_ids_processed"]
+        )
+
+        logger.info(f"Successfully processed {len(request.ens_ids)} ENS IDs for session {session_id}")
+        return response
+
+    except ValueError as ve:
+        logger.error(f"Validation error: {ve}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(ve)
+        )
+    except Exception as e:
+        logger.error(f"Error processing ENS IDs: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to process ENS IDs: {str(e)}"
+        )
 
 # @router.post(
 #     "/session-configuration",

@@ -1,5 +1,5 @@
 from typing import Dict, List, Literal, Optional
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 
 
 class BaseRequest(BaseModel):
@@ -65,3 +65,22 @@ class ClientConfigurationRequest(BaseModel):
     client_name: str
     data : List[ClientConfigurationData]
     require_graph: Literal[True, False]
+
+
+class APIKeyCreateRequest(BaseModel):
+    user_id: str
+    expires_in_days: Optional[int] = Field(30, ge=1, le=365, example=90)
+
+class SessionCreationRequest(BaseModel):
+    ens_ids: List[str] = Field(..., description="List of ENS IDs to process")
+    session_id: str = Field(..., description="Session ID to use")
+    source: str = Field(..., description="Source identifier")
+    source_id: str = Field(..., description="Source ID")
+
+
+class ENSProcessingRequest(BaseModel):
+    ens_ids: List[str]
+    user_id: str
+
+
+

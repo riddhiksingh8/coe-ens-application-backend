@@ -41,7 +41,8 @@ class TruesightStatus(enum.Enum):
 
 
 class STATUS(str, enum.Enum):  
-    QUEUED = "QUEUED" # Added new 
+    QUEUED = "QUEUED"
+    SKIPPED = "SKIPPED"
     NOT_STARTED = "NOT_STARTED"
     STARTED = "STARTED"
     IN_PROGRESS = "IN_PROGRESS" 
@@ -53,6 +54,17 @@ class DUPINSESSION(str, enum.Enum):
     RETAIN = "RETAIN"
     REMOVE = "REMOVE"
     UNIQUE = "UNIQUE"
+
+class NotificationType(str, enum.Enum):
+    UPDATE = "UPDATE"
+    ALERT = "ALERT"
+
+
+class SOURCEENUM(str, enum.Enum):
+    NEW_SESSION = "NEW_SESSION"
+    OD = "OD"
+    CM = "CM"
+    PD = "PD"
 
 class Base(DeclarativeBase):
     create_time: Mapped[datetime] = mapped_column(
@@ -109,6 +121,8 @@ class User(Base):
     otp = Column(String, nullable=True)
     refresh_tokens: Mapped[list["RefreshToken"]] = relationship(back_populates="user")
     user_group = Column(String, nullable=False)
+    api_key = Column(String, unique=True, nullable=False)
+    key_expires_at = Column(DateTime, nullable=True)
     def __repr__(self):
         return f"<User(id={self.id}, user_id='{self.user_id}', email='{self.email}', username='{self.username}')>"
 
@@ -197,6 +211,8 @@ class SupplierMasterData(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(255), nullable=True)
+    uploaded_name = Column(String(255), nullable=True)
+    external_vendor_id = Column(String, nullable=True)
     name_international = Column(String(255), nullable=True)
     address = Column(Text, nullable=True)
     postcode = Column(String(20), nullable=True)
@@ -307,6 +323,8 @@ class ExternalSupplierData(Base):
     orbis_news = Column(JSONB, nullable=True)
     operating_revenue_usd = Column(JSONB, nullable=True)
     event = Column(JSONB, nullable=True)
+    city = Column(String(100), nullable=True)
+    postcode = Column(String(20), nullable=True)
     # Add the UniqueConstraint on the combination of ens_id and session_id
     __table_args__ = (
         UniqueConstraint('ens_id', 'session_id', name='unique_ens_session'),
@@ -324,6 +342,7 @@ class KPISchemas(Base):
     session_id = Column(String, nullable=False)                # Session identifier
     kpi_rating = Column(String, nullable=True) 
     kpi_definition = Column(String, nullable=True) 
+    kpi_data = Column(JSONB, nullable=True)
     
 
 
@@ -398,19 +417,6 @@ class EnsidScreeningStatus(Base):
     __table_args__ = (
         UniqueConstraint('ens_id', 'session_id', name='unique_ensid_session_ensid_screening_status'),
     )
-class SessionScreeningStatus(Base):
-    __tablename__ = "session_screening_status"
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    session_id = Column(String(50), nullable=False)
-    overall_status = Column(SQLAlchemyEnum(STATUS), nullable=False, server_default=expression.literal(STATUS.NOT_STARTED.value))
-    list_upload_status = Column(SQLAlchemyEnum(STATUS), nullable=False, server_default=expression.literal(STATUS.NOT_STARTED.value))
-    supplier_name_validation_status = Column(SQLAlchemyEnum(STATUS), nullable=False, server_default=expression.literal(STATUS.NOT_STARTED.value))
-    screening_analysis_status = Column(SQLAlchemyEnum(STATUS), nullable=False, server_default=expression.literal(STATUS.NOT_STARTED.value))
-    # Ensure unique constraint for (ens_id, session_id)
-    __table_args__ = (
-        UniqueConstraint('session_id', name='unique_sessionid_session'),
-    )
 
 
 class GridManagement(Base):
@@ -431,7 +437,9 @@ class CompanyProfile(Base):
     __tablename__ = "company_profile"
 
     id = Column(Integer, primary_key=True, autoincrement=True)  # Primary key added
-    name = Column(String, nullable=True)  
+    name = Column(String, nullable=True) 
+    uploaded_name = Column(String(255), nullable=True)
+    external_vendor_id = Column(String, nullable=True) 
     location = Column(String, nullable=True)
     address = Column(String, nullable=True)    
     website = Column(String, nullable=True)    
@@ -536,6 +544,120 @@ class TokenMonitor(Base):
     payload = Column(JSONB, nullable=True)
     openai_model = Column(Text, nullable=True)
 
+class WebhookResponse(Base):
+    __tablename__ = "webhook_response"
+
+    id = Column(Integer,  primary_key=True, autoincrement=True)
+    response = Column(String(50))
+    response_time = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+class GridPMTracking(Base):
+    __tablename__ = "grid_pm_tracking"
+
+    id = Column(Integer, autoincrement=True)
+    grid_tracking_id = Column(String)
+    category = Column(String)
+    grid_enquiry_id = Column(String)
+    primary_id = Column(String, primary_key=True)
+
+class ManagementAssociation(Base):
+    __tablename__ = "management_association"
+
+    contact_id = Column(String, primary_key=True)
+    name = Column(String)
+    associated_ens_id = Column(ARRAY(String))
+
+class ExcludedEntities(Base):
+    __tablename__ = "excluded_entities"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(100))
+    category = Column(Text)
+
+
+class APIKey(Base):
+    __tablename__ = "api_keys"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    api_key = Column(String, unique=True, nullable=False)
+    user_id = Column(String, nullable=False)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, server_default=func.now())
+    expires_at = Column(DateTime, nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint('user_id', 'api_key', name='api_keys_unique'),
+    )
+
+class ContinuousMonitoring(Base):
+    __tablename__ = "continuous_monitoring"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    group_id = Column(String, nullable=False, unique=True)
+    group_name = Column(String)
+
+class ScheduleMonitoring(Base):
+    __tablename__ = "schedule_monitoring"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    group_id = Column(String, nullable=False, unique=True)
+    group_name = Column(String)
+    periodicity = Column(String)
+    start_date = Column(Date)
+    last_scheduled_date = Column(Date)
+    status = Column(String)
+    group_description = Column(Text)
+    created_by = Column(String)
+
+class ENSScheduleGroupMapping(Base):
+    __tablename__ = "ens_schedule_group_mapping"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    ens_id = Column(String, nullable=False)
+    group_id = Column(String, nullable=False)
+
+class SessionGroupMapping(Base):
+    __tablename__ = "session_group_mapping"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    session_id = Column(String)
+    group_id = Column(String)
+    source_id = Column(String)
+
+
+class EnsContinuousGroupMapping(Base):
+    __tablename__ = "ens_continuous_group_mapping"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    ens_id = Column(String(50), nullable=False)
+    group_id = Column(String(50), nullable=False)
+    status = Column(String(50), nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint('ens_id', 'group_id', name='uq_ens_group'),
+    )
+
+# Modifications :
+class SessionScreeningStatus(Base):
+    __tablename__ = "session_screening_status"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    session_id = Column(String(50), nullable=False)
+    overall_status = Column(SQLAlchemyEnum(STATUS), nullable=False, server_default=expression.literal(STATUS.NOT_STARTED.value))
+    list_upload_status = Column(SQLAlchemyEnum(STATUS), nullable=False, server_default=expression.literal(STATUS.NOT_STARTED.value))
+    supplier_name_validation_status = Column(SQLAlchemyEnum(STATUS), nullable=False, server_default=expression.literal(STATUS.NOT_STARTED.value))
+    screening_analysis_status = Column(SQLAlchemyEnum(STATUS), nullable=False, server_default=expression.literal(STATUS.NOT_STARTED.value))
+    
+    # New columns
+    source = Column(SQLAlchemyEnum(SOURCEENUM), nullable=False, server_default=expression.literal(SOURCEENUM.NEW_SESSION.value))
+    source_id = Column(String, nullable=True)  # This is GroupRunID
+
+    __table_args__ = (
+        UniqueConstraint('session_id', name='unique_sessionid_session'),
+    )
+
 class EntityUniverse(Base):
     __tablename__ = "entity_universe"
 
@@ -557,46 +679,32 @@ class EntityUniverse(Base):
     overall_supplier_rating = Column(String(50), nullable=True)
     thematic_rating = Column(JSONB, nullable=True)
 
-class WebhookResponse(Base):
-    __tablename__ = "webhook_response"
+    # New 12 columns
+    management = Column(JSONB, nullable=True)
+    unmodified_name = Column(String(255), nullable=True)
+    unmodified_name_international = Column(String(255), nullable=True)
+    unmodified_address = Column(Text, nullable=True)
+    unmodified_postcode = Column(String(20), nullable=True)
+    unmodified_city = Column(String(100), nullable=True)
+    unmodified_country = Column(String(100), nullable=True)
+    unmodified_phone_or_fax = Column(String(50), nullable=True)
+    unmodified_email_or_website = Column(String(100), nullable=True)
+    unmodified_national_id = Column(String(50), nullable=True)
+    unmodified_state = Column(String(100), nullable=True)
+    unmodified_address_type = Column(String(50), nullable=True)
 
-    id = Column(Integer,  primary_key=True, autoincrement=True)
-    response = Column(String(50))
-    response_time = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    last_screened_date = Column(Date, nullable=True)
+    external_vendor_id = Column(String, nullable=True) 
 
-class GridPMTracking(Base):
-    __tablename__ = "grid_PM_tracking"
+class Notification(Base):
+    __tablename__ = "notification"
 
-    id = Column(Integer, autoincrement=True)
-    grid_tracking_id = Column(String, primary_key=True)
-    category = Column(String)
-    grid_enquiry_id = Column(String)
-    primary_id = Column(String)
-
-class ManagementAssociation(Base):
-    __tablename__ = "management_association"
-
-    id = Column(Integer, autoincrement=True)
-    contact_id = Column(String, primary_key=True)
-    name = Column(String)
-    associated_ens_id = Column(ARRAY(String))
-
-class EnsContinuousMonitoring(Base):
-    __tablename__ = "ens_continuous_monitoring"
-
-    id = Column(Integer, autoincrement=True)
-    ens_id = Column(String(50), primary_key=True)
-    group_id = Column(String(50))
-    last_screened_time = Column(DateTime)
-    name = Column(String(255))
-    name_international = Column(String(255))
-    address = Column(Text)
-    postcode = Column(String(20))
-    city = Column(String(100))
-    country = Column(String(100))
-    phone_or_fax = Column(String(50))
-    email_or_website = Column(String(100))
-    national_id = Column(String(50))
-    state = Column(String(100))
+    id = Column(Integer, autoincrement=True,  primary_key=True)
+    ens_id = Column(String(50), nullable=True)
+    notification_type = Column(SQLAlchemyEnum(NotificationType), nullable=False, server_default=expression.literal(NotificationType.UPDATE.value))
+    title = Column(String(255), nullable=True)
+    description = Column(Text, nullable=True)
+    theme = Column(String(100), nullable=True)
+    data_value = Column(String(255), nullable=True)
+    session_id = Column(String(50), nullable=True)
+    create_time = Column(DateTime(timezone=True), server_default=func.now())

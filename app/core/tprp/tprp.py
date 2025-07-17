@@ -78,8 +78,8 @@ async def process_excel_file(file_contents, current_user, session) -> Dict:
         logger.info(f"TPRP process request for, {current_user}")
         validate_request = await validate_user_request(current_user, session)
         logger.debug(f"validate_request: {validate_request}")
-
-        if validate_request > 5:
+        
+        if validate_request >= 5:
             raise ValueError("Maximum 5 requests can run at one time")
         contents = await file_contents.read()
         excel_file = io.BytesIO(contents)

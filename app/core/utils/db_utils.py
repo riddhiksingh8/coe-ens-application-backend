@@ -1,4 +1,5 @@
 import os
+import uuid
 from typing import Dict
 from fastapi import Depends, logger, HTTPException, status
 from neo4j import AsyncGraphDatabase
@@ -12,7 +13,6 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import aliased
 from datetime import datetime, timedelta
 from app.schemas.logger import logger
-
 async def get_dynamic_ens_data(
     table_name: str, 
     required_columns: list, 
@@ -365,12 +365,13 @@ async def update_supplier_master_data(session, session_id) -> Dict:
         required_columns = [
             "name", "name_international", "address", "postcode", "city", "country",
             "phone_or_fax", "email_or_website", "national_id", "state", "ens_id", 
-            "session_id", "bvd_id", "validation_status", "final_status"
+            "session_id", "bvd_id", "validation_status", "final_status", "uploaded_name", "uploaded_external_vendor_id"
         ]
         columns_to_select = [
             getattr(upload_supplier_master_table.c, column) for column in required_columns
         ]
 
+        print("columns_to_select_______", columns_to_select)
         query = select(*columns_to_select).where(
             and_(
                 or_(
@@ -395,14 +396,21 @@ async def update_supplier_master_data(session, session_id) -> Dict:
             }
 
         # Prepare rows for insertion
-        rows_to_insert = [dict(zip(columns, row)) for row in rows]
+        RENAME_MAP = {"uploaded_external_vendor_id": "external_vendor_id"}
 
+        rows_to_insert = [
+            {RENAME_MAP.get(k, k): v for k, v in zip(columns, row)}
+            for row in rows
+        ]
+
+        print("rows_to_insert__________", rows_to_insert)
         # Insert or update the rows into the supplier_master_table
         query2 = insert(supplier_master_table).values(rows_to_insert)
         query2 = query2.on_conflict_do_update(
-            index_elements=["ens_id", "session_id"],  # Unique constraint columns
-            set_={col: query2.excluded[col] for col in columns if col not in ["ens_id", "session_id"]}
-        ).returning(*supplier_master_table.c)  # Return inserted/updated rows
+            index_elements=["ens_id", "session_id"],
+            set_={col: query2.excluded[col] for col in rows_to_insert[0].keys() if col not in ["ens_id", "session_id"]}
+        ).returning(*supplier_master_table.c)
+        # Return inserted/updated rows
 
         result = await session.execute(query2)
         inserted_or_updated_rows = result.fetchall()
@@ -696,7 +704,6 @@ async def get_dynamic_ens_data_for_session(
                 f"Table '{table_name}' does not exist in the database schema."
             )
 
-        # If "*" is passed, select all columns
         if required_columns == ["all"]:
             columns_to_select = [table_class.c[column] for column in table_class.c.keys()]
         else:
@@ -733,3 +740,155 @@ async def get_dynamic_ens_data_for_session(
     except Exception as e:
         print(f"An unexpected error occurred: {e}")
         return []
+
+
+async def get_universe_ens_data(
+    table_name: str,
+    required_columns: list,
+    ens_ids: list = None,
+    session: AsyncSession = Depends(deps.get_session)
+):
+    try:
+        table_class = Base.metadata.tables.get(table_name)
+        if table_class is None:
+            raise ValueError(
+                f"Table '{table_name}' does not exist in the database schema."
+            )
+
+        if required_columns == ["all"]:
+            columns_to_select = [table_class]
+        else:
+            columns_to_select = [getattr(table_class.c, column) for column in required_columns]
+
+        query = select(*columns_to_select)
+
+        if ens_ids:
+            query = query.where(table_class.c.ens_id.in_(ens_ids)).distinct()
+
+        result = await session.execute(query)
+
+        columns = result.keys()
+        rows = result.all()
+
+        formatted_res = [dict(zip(columns, row)) for row in rows]
+
+        return formatted_res
+
+    except ValueError as ve:
+        logger.error(f"Error: {ve}")
+        return []
+    except SQLAlchemyError as sa_err:
+        logger.error(f"Database error: {sa_err}")
+        return []
+    except Exception as e:
+        logger.error(f"An unexpected error occurred: {e}")
+        return []
+
+
+async def create_session_from_ens_ids_with_session(
+        ens_ids: list,
+        session_id: str,
+        source: str,
+        source_id: str,
+        current_user,
+        session: AsyncSession
+):
+    """
+    Create a session using provided ENS IDs list along with session_id, source, and source_id.
+    """
+    try:
+        data = await get_universe_ens_data(
+            table_name="entity_universe",
+            required_columns=[
+                "ens_id",
+                "id",
+                "bvd_id",
+                "name",
+                "name_international",
+                "address",
+                "postcode",
+                "city",
+                "country",
+                "phone_or_fax",
+                "email_or_website",
+                "national_id",
+                "state",
+            ],
+            ens_ids=ens_ids,
+            session=session
+        )
+        logger.debug(f"Universe data fetched: {data}")
+
+        if not data:
+            raise ValueError("No data found for the given ENS IDs")
+
+        # Group data by ENS ID and add session_id
+        data_by_ens = {}
+        for row in data:
+            filtered_row = {
+                "ens_id": row.get("ens_id"),
+                "session_id": session_id,
+                "bvd_id": row.get("bvd_id"),
+                "name": row.get("name"),
+                "name_international": row.get("name_international"),
+                "address": row.get("address"),
+                "postcode": row.get("postcode"),
+                "city": row.get("city"),
+                "country": row.get("country"),
+                "phone_or_fax": row.get("phone_or_fax"),
+                "email_or_website": row.get("email_or_website"),
+                "national_id": row.get("national_id"),
+                "state": row.get("state"),
+                "validation_status": FinalValidatedStatus.VALIDATED.value,
+                "report_generation_status": STATUS.NOT_STARTED.value,
+                "final_status": FinalStatus.ACCEPTED.value,
+                "uploaded_name": row.get("unmodified_name"),
+                "external_vendor_id": row.get("external_vendor_id"),
+            }
+
+            eid = row.get("ens_id")
+            if eid:
+                data_by_ens.setdefault(eid, []).append(filtered_row)
+
+        total_inserted = 0
+        for ens_id, rows in data_by_ens.items():
+            result = await insert_dynamic_ens_data(
+                table_name="supplier_master_data",
+                kpi_data=rows,
+                ens_id=ens_id,
+                session_id=session_id,
+                session=session
+            )
+            inserted = result.get("rows_inserted", 0)
+            total_inserted += inserted
+
+        screening_status_data = [{
+            "overall_status": STATUS.NOT_STARTED,
+            "list_upload_status": STATUS.SKIPPED,
+            "supplier_name_validation_status": STATUS.SKIPPED,
+            "screening_analysis_status": STATUS.NOT_STARTED,
+            "source": source,
+            "source_id": source_id
+        }]
+        response = await upsert_session_screening_status(
+            screening_status_data,
+            session_id,
+            session
+        )
+
+        if response.get("message") != "Upsert completed":
+            raise Exception("Session screening status insertion failed")
+
+        return {
+            "session_id": session_id,
+            "rows_inserted": total_inserted,
+            "session_screening_status": "Updated",
+            "ens_ids_processed": len(ens_ids)
+        }
+
+    except Exception as e:
+        logger.error(f"Error in creating session from ENS IDs with session_id {session_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Session creation failed: {str(e)}"
+        )

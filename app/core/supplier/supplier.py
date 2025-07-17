@@ -145,7 +145,7 @@ async def get_session_supplier(sess_id, page_no, rows_per_page, final_validation
                          "bvd_id", "validation_status", "suggested_name", "suggested_name_international", 
                          "suggested_address", "suggested_postcode", "suggested_city", "suggested_country", 
                          "suggested_phone_or_fax", "suggested_email_or_website", "suggested_national_id", 
-                         "suggested_state", "suggested_address_type", "orbis_matched_status", "final_status", "final_validation_status", "matched_percentage", "duplicate_in_session"]
+                         "suggested_state", "suggested_address_type", "orbis_matched_status", "final_status", "final_validation_status", "matched_percentage", "duplicate_in_session", "uploaded_external_vendor_id"]
 
         session_supplier_data = await get_dynamic_ens_data(
             table_name="upload_supplier_master_data", 
@@ -244,7 +244,7 @@ async def update_suggestions_bulk(payload, session) -> Dict:
                 email_or_website=table_class.c.suggested_email_or_website,
                 national_id=table_class.c.suggested_national_id,
                 state=table_class.c.suggested_state,
-                address_type=table_class.c.suggested_address_type,
+                address_type=table_class.c.suggested_address_type,             
                 final_status=final_response
             )
         )
@@ -448,8 +448,8 @@ async def get_main_session_supplier(sess_id, page_no, rows_per_page, session) ->
         extra_filters = {"offset": offset, "limit": limit}
 
         select_column = [
-            "id", "name", "name_international", "address", "postcode", "city", "country",
-            "phone_or_fax", "email_or_website", "national_id", "state", "ens_id",
+            "id", "name", "name_international", "address", "postcode", "city", "country", "uploaded_name",
+            "phone_or_fax", "email_or_website", "national_id", "state", "ens_id", "external_vendor_id",
             "session_id", "bvd_id", "create_time", "update_time", "validation_status", "final_status", "report_generation_status"
         ]
         

@@ -1,4 +1,5 @@
-from typing import Dict
+from datetime import datetime
+from typing import Dict, Optional
 from pydantic import BaseModel, ConfigDict, EmailStr
 
 
@@ -22,3 +23,21 @@ class ResponseMessage(BaseModel):
     status: str
     data: Dict # data is now a dictionary
     message: str
+
+class APIKeyResponse(BaseModel):
+    api_key: str
+    expires_at: Optional[datetime]
+    is_active: bool = True
+
+class ENSProcessingResponse(BaseModel):
+    session_id: str
+    rows_inserted: int
+    session_screening_status: str
+    ens_ids_processed: int
+
+class SessionCreationResponse(BaseModel):
+    session_id: str
+    rows_inserted: int
+    session_screening_status: str
+    ens_ids_processed: int
+
